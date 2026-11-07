@@ -1,0 +1,68 @@
+# Variable registry of Nadir (docs/design.md, section 3).
+# A variable enters only with a verified licence and its attribution text as the provider asks
+# for it. "[date]" or "[FECHA]" in an attribution is filled with the download date.
+
+[[variable]]
+id = "mapbiomas.fuego.c1.anual"
+proveedor = "MapBiomas Chile"
+producto = "MapBiomas Fuego Chile, área quemada anual"
+version = "Colección 1"
+licencia = "MapBiomas-Chile"
+atribucion = "MapBiomas Project – MapBiomas Fire Chile Collection 1, accessed on [date] through the link: [chile.mapbiomas.org]"
+unidad = "fracción de área quemada"
+tiempo = [2013, 2025]
+agregacion = "fraccion"
+sin_dato = "píxel fuera del mapeo: excluido"
+url = "https://chile.mapbiomas.org/"
+
+[[variable]]
+id = "mapbiomas.fuego.c1.mensual"
+proveedor = "MapBiomas Chile"
+producto = "MapBiomas Fuego Chile, mes de quema"
+version = "Colección 1"
+licencia = "MapBiomas-Chile"
+atribucion = "MapBiomas Project – MapBiomas Fire Chile Collection 1, accessed on [date] through the link: [chile.mapbiomas.org]"
+unidad = "mes de quema del año (1 a 12); en celdas, mes con más área quemada"
+tiempo = [2013, 2025]
+agregacion = "moda"
+sin_dato = "0 (no quemado) y 255 (fuera de las siete regiones): excluidos"
+url = "https://chile.mapbiomas.org/"
+
+[[variable]]
+id = "mapbiomas.fuego.c1.frecuencia"
+proveedor = "MapBiomas Chile"
+producto = "MapBiomas Fuego Chile, número de años con quema (derivado del área quemada anual)"
+version = "Colección 1"
+licencia = "MapBiomas-Chile"
+atribucion = "MapBiomas Project – MapBiomas Fire Chile Collection 1, accessed on [date] through the link: [chile.mapbiomas.org]"
+unidad = "años con quema entre 2013 y 2025; una sola tabla, rotulada 2025"
+tiempo = [2025, 2025]
+agregacion = "media"
+sin_dato = "255 (fuera de las siete regiones): excluido"
+url = "https://chile.mapbiomas.org/"
+
+[[variable]]
+id = "mapbiomas.cobertura.c2.clase"
+proveedor = "MapBiomas Chile"
+producto = "Cobertura y Uso del Suelo, mapas anuales"
+version = "Colección 2.0"
+licencia = "MapBiomas-Chile"
+atribucion = "MapBiomas Chile Project - Collection 2.0 of the Annual Series of Land Cover and Land Use Maps of Chile, consulted on [date] via the link: https://chile.mapbiomas.org"
+unidad = "código de clase de la leyenda de la colección 2"
+tiempo = [1999, 2024]
+agregacion = "moda"
+sin_dato = "código 0: excluido"
+url = "https://chile.mapbiomas.org/"
+
+[[variable]]
+id = "mapbiomas.agua.c1.anual"
+proveedor = "MapBiomas Chile"
+producto = "MapBiomas Agua Chile, superficie de agua anual"
+version = "Colección 1"
+licencia = "MapBiomas-Chile"
+atribucion = "MapBiomas – Mapas de superficie hídrica de Chile, Colección 1, accedido en [FECHA] a través del enlace: https://plataforma.chile.mapbiomas.org/"
+unidad = "fracción de área con agua"
+tiempo = [1998, 2025]
+agregacion = "fraccion"
+sin_dato = "píxel fuera del mapeo: excluido"
+url = "https://chile.mapbiomas.org/"

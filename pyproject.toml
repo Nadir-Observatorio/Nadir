@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nadir-observatorio"
+version = "0.1.0"
+description = "Open observatory of socio-environmental hazard and vulnerability in Chile: common H3 substrate, variable registry and provenance."
+readme = "README.md"
+license = "MIT"
+authors = [{ name = "Camilo López Barra" }]
+requires-python = ">=3.12"
+dependencies = [
+    "numpy==2.5.4",
+    "pyarrow==26.0.1",
+    "h3==4.5.0",
+    "rasterio==1.5.0",
+    "scipy==1.18.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest==9.2.0", "ruff==0.17.3", "mypy==2.4.1"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+nadir = ["py.typed"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "ANN", "S", "PTH", "SIM", "RUF"]
+ignore = ["RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "ANN"]
+
+[tool.mypy]
+strict = true
+files = ["src/nadir"]
+
+[[tool.mypy.overrides]]
+module = ["h3", "h3.*", "pyarrow", "pyarrow.*", "rasterio", "rasterio.*", "scipy", "scipy.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Third-party notices with NumPy 2.5, harmless: rasterio sets an array shape when reading, and
+# affine warns about its own operator in rasterio.transform.
+filterwarnings = [
+    "ignore:Setting the shape on a NumPy array has been deprecated:DeprecationWarning",
+    "ignore:Use `@` matmul instead of `\\*` mul operator:PendingDeprecationWarning",
+]

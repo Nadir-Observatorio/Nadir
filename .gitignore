@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+datos_crudos/
+# Data never enter the repository: originals live in the bank, derivatives in their own folder.
+*.tif
+*.zip
+*.npy
+*.u8
+*.u32
+*.i16
+*.parquet
