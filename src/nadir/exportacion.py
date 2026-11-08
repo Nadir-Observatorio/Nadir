@@ -86,6 +86,23 @@ def desfase(base: Grilla, otra: Grilla) -> tuple[int, int]:
     return columna, fila
 
 
+def misma_grilla(a: Grilla, b: Grilla) -> bool:
+    """Whether two grids put every pixel in the same place.
+
+    Exports of different products can carry cell sizes that differ in the last bit of their
+    floating-point value. They are the same grid when shapes match, corners align and the size
+    difference, added up across the whole grid, stays below a millionth of a cell.
+    """
+    if (a.ancho, a.alto) != (b.ancho, b.alto):
+        return False
+    if abs(a.paso - b.paso) * max(a.ancho, a.alto) > a.paso * _TOLERANCIA:
+        return False
+    try:
+        return desfase(a, b) == (0, 0)
+    except GridError:
+        return False
+
+
 @dataclass(frozen=True)
 class Tesela:
     """One tile of an export: where it is stored and where it sits in the full image."""

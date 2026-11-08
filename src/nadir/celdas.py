@@ -209,7 +209,7 @@ def tabular(
     into their parents (any resolution from 0, for blocks). Pixels outside the map are left out;
     every value is kept, including the export's no-data value, so callers decide what counts.
     """
-    if mosaico.grilla != mapa.grilla:
+    if not exportacion.misma_grilla(mosaico.grilla, mapa.grilla):
         raise GridError("the export and the cell map have different grids")
     resolucion = mapa.resolucion if resolucion is None else resolucion
     total = np.zeros((mapa.celdas.size, 256), dtype=np.float64)

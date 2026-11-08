@@ -116,7 +116,10 @@ def tabular(
         raise LayerError("excluding scar flags needs the scar layer")
     if not 0 <= excluir_bits <= 255 or not 0 <= excluir_bits_control <= 255:
         raise LayerError("scar flags are one byte")
-    if not cob.grilla == anual.grilla == mapa.grilla:
+    if not (
+        exportacion.misma_grilla(cob.grilla, mapa.grilla)
+        and exportacion.misma_grilla(anual.grilla, mapa.grilla)
+    ):
         raise LayerError("land cover, fire and cell map must share one grid")
     if alto < 1:
         raise LayerError(f"strip height must be positive, not {alto}")

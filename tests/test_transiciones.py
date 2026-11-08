@@ -343,3 +343,15 @@ def test_scar_exclusion_needs_the_layer(datos, tmp_path):
         transiciones.tabular(mapa, mc, mf, (2015,), (-1,), excluir_bits=2)
     with pytest.raises(LayerError, match="one byte"):
         transiciones.tabular(mapa, mc, mf, (2015,), (-1,), cicatrices=tmp_path, excluir_bits=256)
+
+
+def test_fire_grid_differing_in_the_last_bit_is_accepted(datos, tmp_path):
+    mapa, mc, mf, _, anual = datos
+    paso = float(np.nextafter(PASO, 1.0))
+    assert paso != PASO
+    ruta = exportar(tmp_path / "g.zip", "g", anual, FUE_BANDAS, lado=16, paso=paso)
+    with exportacion.abrir([ruta], "g") as mg:
+        assert mg.grilla != mc.grilla
+        otra = transiciones.tabular(mapa, mc, mg, (2014,), (-1, 2, 3), 7)
+    base = transiciones.tabular(mapa, mc, mf, (2014,), (-1, 2, 3), 7)
+    assert transiciones.huella(otra) == transiciones.huella(base)

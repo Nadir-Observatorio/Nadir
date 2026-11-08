@@ -1,4 +1,5 @@
 import zipfile
+from dataclasses import replace
 
 import numpy as np
 import pytest
@@ -190,3 +191,15 @@ def test_misaligned_grids_are_refused():
         exportacion.desfase(base, exportacion.Grilla(-72.0 + PASO / 2, -33.0, PASO, 10, 10))
     with pytest.raises(GridError, match="cell sizes differ"):
         exportacion.desfase(base, exportacion.Grilla(-72.0, -33.0, PASO * 1.001, 10, 10))
+
+
+def test_same_grid_tolerates_the_last_bit_of_the_cell_size():
+    esquina = (-73.97383819597547, -32.020538133968756)
+    cob = exportacion.Grilla(*esquina, 0.0002694945852358564, 15600, 28263)
+    fue = exportacion.Grilla(*esquina, 0.00026949458523585647, 15600, 28263)
+    assert cob != fue
+    assert exportacion.misma_grilla(cob, fue)
+    assert not exportacion.misma_grilla(cob, replace(fue, alto=28262))
+    assert not exportacion.misma_grilla(cob, replace(fue, oeste=fue.oeste + fue.paso))
+    assert not exportacion.misma_grilla(cob, replace(fue, oeste=fue.oeste + fue.paso / 3))
+    assert not exportacion.misma_grilla(cob, replace(fue, paso=fue.paso * (1 + 1e-9)))
