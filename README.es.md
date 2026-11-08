@@ -50,7 +50,13 @@ python -m nadir fuego cicatrices --bruto <banco> --salida <archivo.csv>   # cica
 python -m nadir celdas construir --bruto <banco> --resolucion 7 --salida <carpeta>  # mapa de píxeles a celdas, una vez
 python -m nadir elevacion descargar --bruto <banco>                        # teselas Copernicus GLO-30 del área de estudio
 python -m nadir elevacion pendiente --bruto <banco> --salida <carpeta>     # tramos de pendiente y altitud en la grilla de Cobertura
+python -m nadir lfs construir --bruto <banco> --salida <carpeta>           # Landscape Fire Scars en la grilla de Cobertura
+python -m nadir transiciones tabular --bruto <banco> --celdas <carpeta> --desfases=-1,2,3 --anios 2013 2021 --salida <archivo.parquet>
 ```
+
+`transiciones tabular` acepta además `--resolucion`, `--pendiente <carpeta>` (filas separadas por
+tramo de pendiente) y `--cicatrices <carpeta>` con `--excluir` o `--excluir-control`
+(`ignicion_2008_2012`, `hasta_2018`) para dejar fuera los píxeles dentro de cicatrices conocidas.
 
 El código y sus mensajes están en inglés; los nombres de los módulos, en español.
 

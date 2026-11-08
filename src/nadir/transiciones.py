@@ -16,6 +16,11 @@ With slope bands (from `capas.elevacion.construir_pendiente`), each row also car
 its pixels, so control strata (cell, previous class and slope band) can be formed from the table.
 Pixels without a slope band are then left out, and their area is reported.
 
+With a scar layer (from `capas.lfs.construir`), pixels carrying any of the flags in
+`excluir_bits` leave every group, and pixels carrying any of `excluir_bits_control` leave the
+control group only; the area left out is reported. This is how the sensitivities that exclude
+known Landscape Fire Scars are built.
+
 Cells come from a resolution-8 map. A coarser resolution adds up child cells, so tables nest
 exactly across scales.
 
@@ -35,7 +40,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from nadir import celdas, exportacion
-from nadir.capas import cobertura, elevacion, fuego
+from nadir.capas import cobertura, elevacion, fuego, lfs
 from nadir.errors import LayerError, TableError
 
 GRUPOS = ("control", "quemado", "requemado")
@@ -63,6 +68,9 @@ class Tabla:
     tramo: npt.NDArray[np.int8]
     con_pendiente: bool = False
     excluido_sin_pendiente_m2: float = 0.0
+    excluir_bits: int = 0
+    excluir_bits_control: int = 0
+    excluido_por_cicatrices_m2: float = 0.0
 
     def __len__(self) -> int:
         return int(self.area_m2.size)
@@ -93,13 +101,21 @@ def tabular(
     resolucion: int = 7,
     alto: int = FRANJA,
     pendiente: Path | None = None,
+    cicatrices: Path | None = None,
+    excluir_bits: int = 0,
+    excluir_bits_control: int = 0,
 ) -> Tabla:
     """Area of each combination of classes at `desfases` from each fire year, by cell and group.
 
     With `pendiente` (a folder written by `construir_pendiente` on the same grid), rows are also
-    split by slope band.
+    split by slope band. With `cicatrices` (a folder written by `capas.lfs.construir`), flagged
+    pixels are left out as the module docstring says.
     """
     _comprobar(desfases, anios)
+    if (excluir_bits or excluir_bits_control) and cicatrices is None:
+        raise LayerError("excluding scar flags needs the scar layer")
+    if not 0 <= excluir_bits <= 255 or not 0 <= excluir_bits_control <= 255:
+        raise LayerError("scar flags are one byte")
     if not cob.grilla == anual.grilla == mapa.grilla:
         raise LayerError("land cover, fire and cell map must share one grid")
     if alto < 1:
@@ -108,6 +124,7 @@ def tabular(
     n_celdas = mapa.celdas.size
     partes: dict[int, dict[int, float]] = {a: {} for a in anios}
     excluido = 0.0
+    por_cicatrices = 0.0
     for fila in range(0, mapa.grilla.alto, alto):
         filas = min(alto, mapa.grilla.alto - fila)
         indices = mapa.indices(fila, filas)
@@ -127,6 +144,12 @@ def tabular(
         else:
             tramos = elevacion.leer_tramos(pendiente, mapa.grilla, fila, filas)
             con_tramo = tramos != elevacion.SIN_TRAMO
+        if cicatrices is None:
+            banderas = np.zeros(indices.shape, dtype=np.uint8)
+        else:
+            banderas = lfs.leer_banderas(cicatrices, mapa.grilla, fila, filas)
+        fuera_todos = (banderas & excluir_bits) != 0
+        fuera_control = (banderas & excluir_bits_control) != 0
         for anio in anios:
             leidas = [clases[anio + d] for d in desfases]
             valido = dentro.copy()
@@ -138,6 +161,9 @@ def tabular(
             grupo[quemado & (veces == 1)] = 1
             grupo[quemado & (veces >= 2)] = 2
             usar = valido & (grupo >= 0)
+            sacar = fuera_todos | (fuera_control & (grupo == 0))
+            por_cicatrices += float(np.sum(area[usar & sacar]))
+            usar &= ~sacar
             excluido += float(np.sum(area[usar & ~con_tramo]))
             usar &= con_tramo
             if not np.any(usar):
@@ -153,7 +179,14 @@ def tabular(
             for k, v in zip(unicas.tolist(), sumas.tolist(), strict=True):
                 acumulado[k] = acumulado.get(k, 0.0) + v
     tabla = _armar(mapa, partes, desfases, resolucion, n_celdas)
-    return replace(tabla, con_pendiente=pendiente is not None, excluido_sin_pendiente_m2=excluido)
+    return replace(
+        tabla,
+        con_pendiente=pendiente is not None,
+        excluido_sin_pendiente_m2=excluido,
+        excluir_bits=excluir_bits,
+        excluir_bits_control=excluir_bits_control,
+        excluido_por_cicatrices_m2=por_cicatrices,
+    )
 
 
 def _armar(
@@ -220,6 +253,8 @@ def huella(tabla: Tabla) -> str:
     """Content hash over the sorted rows, with exact float representation."""
     resumen = hashlib.sha256()
     cabecera = f"{tabla.resolucion}\t{list(tabla.desfases)}\t{tabla.con_pendiente}\n"
+    if tabla.excluir_bits or tabla.excluir_bits_control:
+        cabecera += f"excluir\t{tabla.excluir_bits}\t{tabla.excluir_bits_control}\n"
     resumen.update(cabecera.encode("ascii"))
     for i in range(len(tabla)):
         clases = ",".join(str(int(c)) for c in tabla.clases[i])
@@ -268,6 +303,9 @@ def escribir(ruta: Path, tabla: Tabla, procedencia: dict[str, str]) -> str:
         "desfases": json.dumps(list(tabla.desfases)),
         "con_pendiente": json.dumps(tabla.con_pendiente),
         "excluido_sin_pendiente_m2": repr(tabla.excluido_sin_pendiente_m2),
+        "excluir_bits": str(tabla.excluir_bits),
+        "excluir_bits_control": str(tabla.excluir_bits_control),
+        "excluido_por_cicatrices_m2": repr(tabla.excluido_por_cicatrices_m2),
         "huella": contenido,
         "procedencia": json.dumps(procedencia, sort_keys=True, ensure_ascii=False),
     }

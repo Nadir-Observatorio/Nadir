@@ -8,15 +8,24 @@ python -m nadir fuego cicatrices --bruto F:\\Biblioteca\\bruto --salida scars.cs
 python -m nadir celdas construir --bruto F:\\Biblioteca\\bruto --resolucion 7 --salida <folder>
 python -m nadir elevacion descargar --bruto F:\\Biblioteca\\bruto
 python -m nadir elevacion pendiente --bruto F:\\Biblioteca\\bruto --salida <folder>
+python -m nadir lfs construir --bruto F:\\Biblioteca\\bruto --salida <folder>
+python -m nadir transiciones tabular --bruto F:\\Biblioteca\\bruto --celdas <folder>
+    --desfases=-1,2,3 --anios 2013 2021 --salida <table.parquet>
+    [--resolucion 7] [--pendiente <folder>] [--cicatrices <folder>]
+    [--excluir ignicion_2008_2012] [--excluir-control hasta_2018]
 """
 
 import argparse
+import hashlib
 import sys
 from pathlib import Path
 
-from nadir import banco, celdas, exportacion
-from nadir.capas import cobertura, elevacion, fuego
+import nadir
+from nadir import banco, celdas, exportacion, transiciones
+from nadir.capas import cobertura, elevacion, fuego, lfs
 from nadir.errors import NadirError
+
+_BITS = {"hasta_2018": lfs.BIT_HASTA_2018, "ignicion_2008_2012": lfs.BIT_IGNICION_2008_2012}
 
 
 def _ha(valor: float) -> str:
@@ -157,6 +166,83 @@ def _elevacion_pendiente(args: argparse.Namespace) -> None:
     print(f"{args.salida}: {g.ancho} x {g.alto} pixels written")
 
 
+def _sha256(ruta: Path) -> str:
+    resumen = hashlib.sha256()
+    with ruta.open("rb") as origen:
+        while bloque := origen.read(1 << 20):
+            resumen.update(bloque)
+    return resumen.hexdigest()
+
+
+def _lfs_construir(args: argparse.Namespace) -> None:
+    bruto = Path(args.bruto)
+    with cobertura.abrir(bruto) as mosaico:
+        grilla = mosaico.grilla
+    registro = lfs.construir(bruto, grilla, Path(args.salida))
+    comparacion = registro["comparacion"]
+    if not isinstance(comparacion, dict):
+        raise NadirError("scar record without its comparison block")
+    print(
+        f"{registro['cicatrices']} scars read; {registro['cicatrices_en_grilla']} touch the grid; "
+        f"{comparacion['cicatrices']} kept for the comparison"
+    )
+    print(f"{args.salida}: flags, inventory and comparison pixels written")
+
+
+def _desfases(texto: str) -> tuple[int, ...]:
+    try:
+        return tuple(int(x) for x in texto.split(","))
+    except ValueError:
+        raise NadirError(f"offsets must be integers separated by commas, not {texto!r}") from None
+
+
+def _transiciones_tabular(args: argparse.Namespace) -> None:
+    bruto = Path(args.bruto)
+    salida = Path(args.salida)
+    if salida.exists():
+        raise NadirError(f"refusing to overwrite {salida}")
+    if len(args.anios) != 2 or args.anios[0] > args.anios[1]:
+        raise NadirError("--anios takes the first and last fire year")
+    anios = tuple(range(args.anios[0], args.anios[1] + 1))
+    desfases = _desfases(args.desfases)
+    excluir = sum(_BITS[n] for n in set(args.excluir))
+    excluir_control = sum(_BITS[n] for n in set(args.excluir_control))
+    pendiente = Path(args.pendiente) if args.pendiente else None
+    cicatrices = Path(args.cicatrices) if args.cicatrices else None
+    procedencia = {
+        "nadir": nadir.__version__,
+        "fuego_procedencia_sha256": _sha256(bruto / fuego.CARPETA / banco.PROCEDENCIA),
+        "cobertura_procedencia_sha256": _sha256(bruto / cobertura.CARPETA / banco.PROCEDENCIA),
+        "celdas_mapa_sha256": _sha256(Path(args.celdas) / "mapa.json"),
+        "anios": f"{anios[0]}-{anios[-1]}",
+    }
+    if pendiente is not None:
+        procedencia["pendiente_sha256"] = _sha256(pendiente / "pendiente.json")
+    if cicatrices is not None:
+        procedencia["cicatrices_sha256"] = _sha256(cicatrices / "lfs.json")
+    with cobertura.abrir(bruto) as cob:
+        anual, mensual = fuego.abrir(bruto)
+        with anual, mensual:
+            mapa = celdas.abrir(Path(args.celdas), cob.grilla)
+            tabla = transiciones.tabular(
+                mapa,
+                cob,
+                anual,
+                anios,
+                desfases,
+                args.resolucion,
+                pendiente=pendiente,
+                cicatrices=cicatrices,
+                excluir_bits=excluir,
+                excluir_bits_control=excluir_control,
+            )
+    contenido = transiciones.escribir(salida, tabla, procedencia)
+    print(f"{salida}: {len(tabla)} rows, fire years {anios[0]}-{anios[-1]}, offsets {desfases}")
+    print(f"  pixels left out without slope band: {_ha(tabla.excluido_sin_pendiente_m2 / 1e4)}")
+    print(f"  pixels left out by scar flags: {_ha(tabla.excluido_por_cicatrices_m2 / 1e4)}")
+    print(f"  hash {contenido}")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m nadir")
     temas = parser.add_subparsers(dest="tema", required=True)
@@ -215,6 +301,37 @@ def main(argv: list[str] | None = None) -> int:
     ele_pen.add_argument("--bruto", required=True, help="root of the raw-data bank")
     ele_pen.add_argument("--salida", required=True, help="folder for the files; never overwritten")
     ele_pen.set_defaults(funcion=_elevacion_pendiente)
+
+    lf = temas.add_parser("lfs", help="Landscape Fire Scars Database for Chile")
+    lf_acc = lf.add_subparsers(dest="accion", required=True)
+    lf_con = lf_acc.add_parser("construir", help="scar flags and inventory on the export grid")
+    lf_con.add_argument("--bruto", required=True, help="root of the raw-data bank")
+    lf_con.add_argument("--salida", required=True, help="folder for the files; never overwritten")
+    lf_con.set_defaults(funcion=_lfs_construir)
+
+    tra = temas.add_parser("transiciones", help="land cover transitions by H3 cell")
+    tra_acc = tra.add_subparsers(dest="accion", required=True)
+    tra_tab = tra_acc.add_parser("tabular", help="area of each combination of classes, to Parquet")
+    tra_tab.add_argument("--bruto", required=True, help="root of the raw-data bank")
+    tra_tab.add_argument("--celdas", required=True, help="folder of the resolution-8 cell map")
+    tra_tab.add_argument(
+        "--desfases", required=True, help="offsets from the fire year, e.g. --desfases=-1,2,3"
+    )
+    tra_tab.add_argument(
+        "--anios", type=int, nargs=2, required=True, help="first and last fire year"
+    )
+    tra_tab.add_argument("--resolucion", type=int, default=7, help="H3 resolution of the rows")
+    tra_tab.add_argument("--pendiente", default=None, help="folder of the slope bands")
+    tra_tab.add_argument("--cicatrices", default=None, help="folder of the scar layer")
+    tra_tab.add_argument(
+        "--excluir", nargs="+", choices=sorted(_BITS), default=[], help="flags out of every group"
+    )
+    tra_tab.add_argument(
+        "--excluir-control", nargs="+", choices=sorted(_BITS), default=[],
+        help="flags out of the control group",
+    )
+    tra_tab.add_argument("--salida", required=True, help="Parquet file; never overwritten")
+    tra_tab.set_defaults(funcion=_transiciones_tabular)
 
     args = parser.parse_args(argv)
     try:

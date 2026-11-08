@@ -49,7 +49,13 @@ python -m nadir fuego cicatrices --bruto <bank> --salida <file.csv>    # fire sc
 python -m nadir celdas construir --bruto <bank> --resolucion 7 --salida <folder>  # pixel-to-cell map, once
 python -m nadir elevacion descargar --bruto <bank>                       # Copernicus GLO-30 tiles of the study area
 python -m nadir elevacion pendiente --bruto <bank> --salida <folder>     # slope bands and altitude on the land cover grid
+python -m nadir lfs construir --bruto <bank> --salida <folder>           # Landscape Fire Scars on the land cover grid
+python -m nadir transiciones tabular --bruto <bank> --celdas <folder> --desfases=-1,2,3 --anios 2013 2021 --salida <file.parquet>
 ```
+
+`transiciones tabular` also takes `--resolucion`, `--pendiente <folder>` (rows split by slope
+band) and `--cicatrices <folder>` with `--excluir` or `--excluir-control` (`ignicion_2008_2012`,
+`hasta_2018`) to leave out pixels inside known fire scars.
 
 ## Licence
 

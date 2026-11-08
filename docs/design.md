@@ -83,6 +83,15 @@ and never burned. Classes keep their original legend codes, with the level-1 cla
 With slope bands, each row also carries the band of its pixels, so control strata can be
 formed from the table; pixels without a band are left out and their area is reported.
 
+Landscape Fire Scars (`capas/lfs.py`) are read inside their zip files, without extracting
+anything: of the seven files each fire has, only the binary scar raster and the attribute table
+of its polygons (total area, season, overlaps) are used, and the CONAF ignition date comes from
+the file name. Each land cover pixel takes the scar pixel that holds its centre. One pass writes
+a byte of flags per pixel (inside any scar; inside a scar ignited in 2008 to 2012), an inventory
+of every scar with the sha256 of the raster it came from, and the pixels of the scars chosen
+for the comparison with MapBiomas Fire. A transition table can leave out flagged pixels from
+every group or from the control group only, and reports the area it left out.
+
 Slope is computed on the native grid of the elevation model (Horn, with east-west and
 north-south spacing from the ellipsoid at each latitude), and each land cover pixel takes the
 slope and altitude of the elevation pixel that holds its centre, without averaging.

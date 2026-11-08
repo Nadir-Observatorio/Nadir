@@ -260,3 +260,86 @@ def test_slope_from_another_grid_is_refused(datos, tmp_path):
     _pendiente_falsa(tmp_path / "pend", otra)
     with pytest.raises(Exception, match="another grid"):
         transiciones.tabular(mapa, mc, mf, (2015,), (-1,), 8, pendiente=tmp_path / "pend")
+
+
+def _cicatrices_falsas(carpeta, grilla, semilla=5):
+    """Scar flags as `capas.lfs.construir` writes them, with random bits."""
+    from dataclasses import asdict
+
+    rng = np.random.default_rng(semilla)
+    banderas = rng.choice([0, 1, 3], size=(ALTO, ANCHO), p=[0.6, 0.25, 0.15]).astype(np.uint8)
+    carpeta.mkdir()
+    banderas.tofile(carpeta / "banderas.u8")
+    (carpeta / "lfs.json").write_text(json.dumps({"grilla": asdict(grilla)}), "utf-8")
+    return banderas
+
+
+@pytest.mark.parametrize(("todos", "control"), [(2, 0), (0, 1), (2, 1), (0, 0)])
+def test_scar_flags_leave_pixels_out(datos, tmp_path, todos, control):
+    mapa, mc, mf, cob, anual = datos
+    banderas = _cicatrices_falsas(tmp_path / "lfs", mapa.grilla)
+    anios, desfases = (2014, 2016), (-1, 2, 3)
+    tabla = transiciones.tabular(
+        mapa, mc, mf, anios, desfases, 8, 7, cicatrices=tmp_path / "lfs",
+        excluir_bits=todos, excluir_bits_control=control,
+    )
+    g = mapa.grilla
+    areas = g.area_filas_m2(0, ALTO)
+    veces = (anual == 1).sum(axis=0)
+    esperado: dict = {}
+    fuera = 0.0
+    for anio in anios:
+        b = fuego.ANIOS.index(anio)
+        for f in range(ALTO):
+            for c in range(ANCHO):
+                if cob[-1, f, c] == 255 or anual[0, f, c] == 255:
+                    continue
+                codigos = [
+                    int(cob[cobertura.ANIOS_ESTUDIO.index(anio + d), f, c]) for d in desfases
+                ]
+                if any(x in (0, 255, 27) for x in codigos):
+                    continue
+                if veces[f, c] == 0:
+                    grupo = "control"
+                elif anual[b, f, c] == 1:
+                    grupo = "quemado" if veces[f, c] == 1 else "requemado"
+                else:
+                    continue
+                bits = int(banderas[f, c])
+                if bits & todos or (grupo == "control" and bits & control):
+                    fuera += areas[f]
+                    continue
+                lat, lon = float(g.latitudes(f, 1)[0]), float(g.longitudes(c, 1)[0])
+                clave = (h3n.latlng_to_cell(lat, lon, 8), anio, grupo, tuple(codigos))
+                esperado[clave] = esperado.get(clave, 0.0) + areas[f]
+    obtenido = _como_dict(tabla)
+    assert obtenido.keys() == esperado.keys()
+    for clave, valor in esperado.items():
+        assert obtenido[clave] == pytest.approx(valor, rel=1e-9)
+    assert tabla.excluido_por_cicatrices_m2 == pytest.approx(fuera, rel=1e-9)
+    assert (fuera > 0) == bool(todos or control)
+    assert (tabla.excluir_bits, tabla.excluir_bits_control) == (todos, control)
+
+
+def test_scar_exclusion_is_recorded_and_changes_the_hash(datos, tmp_path):
+    mapa, mc, mf, *_ = datos
+    _cicatrices_falsas(tmp_path / "lfs", mapa.grilla)
+    sin = transiciones.tabular(mapa, mc, mf, (2015,), (-1, 2), 7)
+    nula = transiciones.tabular(mapa, mc, mf, (2015,), (-1, 2), 7, cicatrices=tmp_path / "lfs")
+    con = transiciones.tabular(
+        mapa, mc, mf, (2015,), (-1, 2), 7, cicatrices=tmp_path / "lfs", excluir_bits_control=1
+    )
+    assert transiciones.huella(nula) == transiciones.huella(sin)
+    assert transiciones.huella(con) != transiciones.huella(sin)
+    transiciones.escribir(tmp_path / "con.parquet", con, {})
+    meta = pq.read_table(tmp_path / "con.parquet").schema.metadata
+    assert meta[b"excluir_bits_control"] == b"1"
+    assert float(meta[b"excluido_por_cicatrices_m2"]) == con.excluido_por_cicatrices_m2 > 0
+
+
+def test_scar_exclusion_needs_the_layer(datos, tmp_path):
+    mapa, mc, mf, *_ = datos
+    with pytest.raises(LayerError, match="scar layer"):
+        transiciones.tabular(mapa, mc, mf, (2015,), (-1,), excluir_bits=2)
+    with pytest.raises(LayerError, match="one byte"):
+        transiciones.tabular(mapa, mc, mf, (2015,), (-1,), cicatrices=tmp_path, excluir_bits=256)
