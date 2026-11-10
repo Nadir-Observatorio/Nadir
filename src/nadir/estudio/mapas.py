@@ -14,6 +14,7 @@ Boundaries of regions and municipalities are not drawn; the cell outlines are H3
 
 import json
 from pathlib import Path
+from typing import Any, NamedTuple
 
 import h3.api.numpy_int as h3n
 import numpy as np
@@ -44,50 +45,82 @@ def _contribuciones(
     return e.q_area, e.q_y - pc[s], ok[s]
 
 
+class Base(NamedTuple):
+    """The H1 estimator and the per-record terms that every split of the effect reuses."""
+
+    k3: pd.DataFrame
+    e: Estimador
+    area: npt.NDArray[np.float64]
+    desvio: npt.NDArray[np.float64]
+    ok: npt.NDArray[np.bool_]
+    h1_pp: float
+
+
+def base(tablas: Path) -> Base:
+    """Load k3, build the H1 estimator and the contribution of each burned forest record."""
+    k3 = cat.preparar(cat.cargar(tablas / "k3.parquet", anio_max=ANIO_MAX_K3))
+    bosque = k3.l0.to_numpy() == BOSQUE
+    e = Estimador(k3, bosque, _cambio(k3), 1, 6, 4, np.unique(k3.r4.to_numpy()))
+    area, desvio, ok = _contribuciones(e)
+    return Base(k3, e, area, desvio, ok, 100 * e.efecto(np.ones(e.nb))[0])
+
+
+def repartir(
+    b: Base,
+    clave_quemado: npt.NDArray[Any],
+    clave_bosque: npt.NDArray[Any],
+    min_ha: float | None = None,
+    nombre: str = "celda",
+) -> pd.DataFrame:
+    """Burned area and H1 effect for each group of a split; stops if the shares miss H1.
+
+    `clave_quemado` labels every once-burned record of k3, `clave_bosque` the burned forest
+    records of the estimator, in the same order as `b.area`.
+    """
+    quemado = b.k3[b.k3.grupo.to_numpy() == 1]
+    todo = quemado.area_m2.groupby(clave_quemado).sum().rename("quemado_ha") / 1e4
+    d = pd.DataFrame(
+        {
+            nombre: clave_bosque,
+            "a": b.area,
+            "a_ok": np.where(b.ok, b.area, 0.0),
+            "ay": np.where(b.ok, b.area * b.e.q_y, 0.0),
+            "ad": np.where(b.ok, b.area * b.desvio, 0.0),
+        }
+    )
+    g = d.groupby(nombre).sum()
+    total_ok = float(b.area[b.ok].sum())
+    t = pd.DataFrame(index=todo.index.union(g.index))
+    t.index.name = nombre
+    t["quemado_ha"] = todo.reindex(t.index).fillna(0.0)
+    t["bosque_quemado_ha"] = (g.a / 1e4).reindex(t.index).fillna(0.0)
+    t["bosque_comparable_ha"] = (g.a_ok / 1e4).reindex(t.index).fillna(0.0)
+    con = t.bosque_comparable_ha >= (MIN_HA_CELDA if min_ha is None else min_ha)
+    efecto = (g.ad / g.a_ok).reindex(t.index)
+    p_q = (g.ay / g.a_ok).reindex(t.index)
+    t["efecto_pp"] = (100 * efecto).where(con)
+    t["p_quemado_pct"] = (100 * p_q).where(con)
+    t["p_control_pct"] = (100 * (p_q - efecto)).where(con)
+    t["aporte_pp"] = (100 * g.ad / total_ok).reindex(t.index).fillna(0.0)
+    suma = float(t.aporte_pp.sum())
+    if abs(suma - b.h1_pp) > 1e-6:
+        raise SourceError(f"{nombre}: shares add up to {suma}, not {b.h1_pp}")
+    return t.reset_index()
+
+
 def por_celda(tablas: Path) -> dict[int, pd.DataFrame]:
     """One table per resolution with burned area and the H1 effect of each cell.
 
     Stops if the shares of a resolution do not add up to the effect of H1.
     """
-    k3 = cat.preparar(cat.cargar(tablas / "k3.parquet", anio_max=ANIO_MAX_K3))
-    bosque = k3.l0.to_numpy() == BOSQUE
-    e = Estimador(k3, bosque, _cambio(k3), 1, 6, 4, np.unique(k3.r4.to_numpy()))
-    area, desvio, ok = _contribuciones(e)
-    q = k3[bosque & (k3.grupo.to_numpy() == 1)]
-    total_ok = float(area[ok].sum())
-    h1_pp = 100 * e.efecto(np.ones(e.nb))[0]
-    quemado = k3[k3.grupo.to_numpy() == 1]
-    salida: dict[int, pd.DataFrame] = {}
-    for res in RESOLUCIONES:
-        col = f"r{res}"
-        todo = quemado.groupby(col).area_m2.sum().rename("quemado_ha") / 1e4
-        d = pd.DataFrame(
-            {
-                "celda": q[col].to_numpy(),
-                "a": area,
-                "a_ok": np.where(ok, area, 0.0),
-                "ay": np.where(ok, area * e.q_y, 0.0),
-                "ad": np.where(ok, area * desvio, 0.0),
-            }
-        )
-        g = d.groupby("celda").sum()
-        t = pd.DataFrame(index=todo.index.union(g.index))
-        t.index.name = "celda"
-        t["quemado_ha"] = todo.reindex(t.index).fillna(0.0)
-        t["bosque_quemado_ha"] = (g.a / 1e4).reindex(t.index).fillna(0.0)
-        t["bosque_comparable_ha"] = (g.a_ok / 1e4).reindex(t.index).fillna(0.0)
-        con = t.bosque_comparable_ha >= MIN_HA_CELDA
-        efecto = (g.ad / g.a_ok).reindex(t.index)
-        p_q = (g.ay / g.a_ok).reindex(t.index)
-        t["efecto_pp"] = (100 * efecto).where(con)
-        t["p_quemado_pct"] = (100 * p_q).where(con)
-        t["p_control_pct"] = (100 * (p_q - efecto)).where(con)
-        t["aporte_pp"] = (100 * g.ad / total_ok).reindex(t.index).fillna(0.0)
-        suma = float(t.aporte_pp.sum())
-        if abs(suma - h1_pp) > 1e-6:
-            raise SourceError(f"resolution {res}: shares add up to {suma}, not {h1_pp}")
-        salida[res] = t.reset_index()
-    return salida
+    b = base(tablas)
+    bosque = b.k3.l0.to_numpy() == BOSQUE
+    q = b.k3[bosque & (b.k3.grupo.to_numpy() == 1)]
+    quemado = b.k3[b.k3.grupo.to_numpy() == 1]
+    return {
+        res: repartir(b, quemado[f"r{res}"].to_numpy(), q[f"r{res}"].to_numpy())
+        for res in RESOLUCIONES
+    }
 
 
 def _poligono(celda: int) -> list[list[list[float]]]:

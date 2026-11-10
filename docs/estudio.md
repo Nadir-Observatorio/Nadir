@@ -123,6 +123,7 @@ python -m nadir estudio tablas ... --salida <tablas> --tablas k5
 python -m nadir estudio analizar --tablas <tablas> --salida resultados.json
 python -m nadir estudio trayectorias --tablas <tablas> --salida trayectorias.json
 python -m nadir estudio mapas --tablas <tablas> --salida <mapas>
+python -m nadir estudio regiones --tablas <tablas> --limites mbchile_regiones_7.geojson --salida <regiones>
 python -m nadir estudio tablas ... --tablas k3 --cicatrices <lfs> --excluir ignicion_2008_2012 --salida <s2>
 python -m nadir estudio sensibilidad --tablas <s2> --numero 2 --salida sensibilidad_2.json
 python -m nadir estudio tablas ... --tablas k3 --cicatrices <lfs> --excluir-control hasta_2018 --salida <s3>
@@ -171,6 +172,10 @@ Where the method left room for a reading, the code takes this one:
   uses the strata of its parent. A cell with less than 100 ha of burned forest in eligible strata
   shows its burned area but no effect. No interval by cell. Cell outlines are H3 cells; no
   administrative boundary is drawn.
+- **Tables by region:** a pixel takes the region that contains the centre of its resolution-8 H3
+  cell (about 0.7 km²); cells whose centre falls in no region go to `sin_region`. The area of the
+  resolution-8 cells that cross a regional boundary is reported to bound the error of the rule.
+  The regional effects are the same exact split of H1 as the maps, without a minimum area.
 
 ## 9. Amendments
 

@@ -46,15 +46,23 @@ for (var a = 2012; a <= 2022; a++) ANIOS_C1.push('classification_' + a);
 
 function listar(carpeta) {
   var salida = [];
+  var sinPermiso = [];
   var pendientes = [carpeta];
   while (pendientes.length > 0) {
     var actual = pendientes.shift();
-    var hijos = ee.data.listAssets(actual).assets || [];
+    var hijos;
+    try {
+      hijos = ee.data.listAssets(actual).assets || [];
+    } catch (e) {
+      sinPermiso.push(actual);
+      continue;
+    }
     hijos.forEach(function (h) {
       if (h.type === 'FOLDER') pendientes.push(h.name);
       else salida.push({id: h.id || h.name, tipo: h.type});
     });
   }
+  if (sinPermiso.length > 0) print('Folders not readable (skipped):', sinPermiso);
   return salida;
 }
 
@@ -63,7 +71,12 @@ print('Assets under LULC:', lulc);
 var candidatosC1 = lulc.filter(function (x) {
   return x.tipo === 'IMAGE' && /classif|clasific/i.test(x.id) && !/COLLECTION-02/i.test(x.id);
 }).filter(function (x) {
-  var bandas = ee.Image(x.id).bandNames().getInfo();
+  var bandas;
+  try {
+    bandas = ee.Image(x.id).bandNames().getInfo();
+  } catch (e) {
+    return false;
+  }
   return ANIOS_C1.every(function (b) { return bandas.indexOf(b) !== -1; });
 });
 print('Collection 1 candidates with bands 2012-2022:', candidatosC1);

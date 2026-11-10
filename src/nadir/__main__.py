@@ -27,6 +27,7 @@ python -m nadir estudio trayectorias --tablas <folder> --salida <results.json>
 python -m nadir estudio urbanizacion --tablas <folder> [--tabla u5|l5] --salida <results.json>
 python -m nadir estudio sensibilidad --tablas <folder> --numero 2 --salida <results.json>
 python -m nadir estudio mapas --tablas <folder> --salida <folder>
+python -m nadir estudio regiones --tablas <folder> --limites <regions.geojson> --salida <folder>
 python -m nadir estudio sensibilidad7 --tablas <folder> --tablas-c1 <folder> --salida <results.json>
 python -m nadir estudio chequeo-lfs --bruto F:\\Biblioteca\\bruto --salida <folder>
 python -m nadir estudio validar --bruto F:\\Biblioteca\\bruto --clases <clases.tif>
@@ -44,7 +45,15 @@ import nadir
 from nadir import banco, celdas, exportacion, transiciones
 from nadir.capas import cobertura, cobertura_c1, elevacion, fuego, interfaz, lfs
 from nadir.errors import NadirError
-from nadir.estudio import analisis, exploratorio, mapas, tablas, trayectorias, validacion
+from nadir.estudio import (
+    analisis,
+    exploratorio,
+    mapas,
+    regiones,
+    tablas,
+    trayectorias,
+    validacion,
+)
 
 _BITS = {"hasta_2018": lfs.BIT_HASTA_2018, "ignicion_2008_2012": lfs.BIT_IGNICION_2008_2012}
 
@@ -318,6 +327,13 @@ def _estudio_mapas(args: argparse.Namespace) -> None:
         print(f"resolution {res}: {len(t)} cells with burned area, {con} with an effect")
     for ruta in rutas:
         print(f"{ruta}: written")
+
+
+def _estudio_regiones(args: argparse.Namespace) -> None:
+    tabla, meta = regiones.por_region(Path(args.tablas), Path(args.limites), args.campo)
+    for ruta in regiones.escribir(tabla, meta, Path(args.salida)):
+        print(f"{ruta}: written")
+    print(f"cells of resolution 8 crossing a boundary: {meta['celdas_r8_en_borde_ha']} ha")
 
 
 def _estudio_chequeo_lfs(args: argparse.Namespace) -> None:
@@ -633,6 +649,14 @@ def main(argv: list[str] | None = None) -> int:
     est_map.add_argument("--tablas", required=True, help="folder of the tables")
     est_map.add_argument("--salida", required=True, help="output folder; never overwritten")
     est_map.set_defaults(funcion=_estudio_mapas)
+    est_reg = est_acc.add_parser(
+        "regiones", help="burned area and H1 effect by region (centre of the resolution-8 cell)"
+    )
+    est_reg.add_argument("--tablas", required=True, help="folder of the tables")
+    est_reg.add_argument("--limites", required=True, help="GeoJSON of the regions")
+    est_reg.add_argument("--campo", default="NAME", help="field with the region name")
+    est_reg.add_argument("--salida", required=True, help="output folder; never overwritten")
+    est_reg.set_defaults(funcion=_estudio_regiones)
     est_lfs = est_acc.add_parser("chequeo-lfs", help="Jaccard of each large scar against Fire")
     est_lfs.add_argument("--bruto", required=True, help="root of the raw-data bank")
     est_lfs.add_argument("--salida", required=True, help="folder for the files; never overwritten")
