@@ -8,7 +8,7 @@ import pytest
 
 from nadir import banco, celdas
 from nadir.__main__ import main
-from nadir.capas import cobertura, elevacion, fuego, interfaz
+from nadir.capas import cobertura, elevacion, fuego, interfaz, lfs
 from nadir.errors import SourceError
 from nadir.estudio import tablas
 from sinteticos import exportar
@@ -346,12 +346,14 @@ def test_lfs_table_groups_by_scar_count(entorno, tmp_path):
     raiz, insumos, g, cob, anual, tramos, _altitud = entorno
     rng = np.random.default_rng(11)
     conteo = rng.choice([0, 0, 1, 1, 2], size=(ALTO, ANCHO)).astype(np.uint8)
-    temporada = np.where(conteo == 1, rng.integers(12, 19, (ALTO, ANCHO)), 0).astype(np.uint8)
+    estaciones = rng.integers(2012, 2019, (ALTO, ANCHO)) - lfs.TEMPORADA_BASE
+    temporada = np.where(conteo == 1, estaciones, 0).astype(np.uint8)
     carpeta = tmp_path / "conteo"
     carpeta.mkdir()
     (carpeta / "conteo.u8").write_bytes(conteo.tobytes())
     (carpeta / "temporada_unica.u8").write_bytes(temporada.tobytes())
-    (carpeta / "conteo.json").write_text(json.dumps({"grilla": asdict(g)}), encoding="utf-8")
+    registro = {"grilla": asdict(g), "temporada_base": lfs.TEMPORADA_BASE}
+    (carpeta / "conteo.json").write_text(json.dumps(registro), encoding="utf-8")
     with pytest.raises(SourceError, match="scar count layer"):
         tablas.construir(raiz, insumos, tmp_path / "x", ("l5",))
     con = tablas.Insumos(insumos.celdas, insumos.pendiente, insumos.interfaz, conteo_lfs=carpeta)
@@ -371,7 +373,7 @@ def test_lfs_table_groups_by_scar_count(entorno, tmp_path):
                     continue
                 if conteo[f, c] == 0 and veces[f, c] == 0:
                     grupo = 0
-                elif conteo[f, c] == 1 and temporada[f, c] == s - 2000:
+                elif conteo[f, c] == 1 and temporada[f, c] == s - lfs.TEMPORADA_BASE:
                     grupo = 1
                 else:
                     continue

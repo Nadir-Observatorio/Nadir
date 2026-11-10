@@ -138,17 +138,27 @@ def test_scar_count_and_single_season(banco_completo, tmp_path):
                       OESTE + 12 * PASO, NORTE - 10 * PASO, 50_000.0)  # overlaps scar 1
         agregar_fuego(z, r, "CL-VS", 8, 400, "20200110", _mascara(2, 2, 0, 2, 0, 2),
                       OESTE + 40 * PASO, NORTE - 30 * PASO, 50_000.0)  # season 2020: ignored
+        agregar_fuego(z, r, "CL-VS", 9, 400, "19900110", _mascara(2, 2, 0, 2, 0, 2),
+                      OESTE + 44 * PASO, NORTE - 5 * PASO, 50_000.0)  # an early season
     banco.registrar(car, "FireScar_CL-VS_copia.zip", "p", lfs.PAGINA, False)
     registro = lfs.construir_conteo(raiz, G, tmp_path / "conteo")
     conteo, temporada = lfs.leer_conteo(tmp_path / "conteo", G, 0, ALTO)
     assert conteo[10, 12] == 2 and temporada[10, 12] == 0  # scars 1 and 7
-    assert conteo[15, 15] == 1 and temporada[15, 15] == 17  # scar 1 only, season 2017
-    assert conteo[30, 30] == 1 and temporada[30, 30] == 12  # scar 3, season 2012
+    assert conteo[15, 15] == 1 and temporada[15, 15] == 2017 - lfs.TEMPORADA_BASE  # scar 1
+    assert conteo[30, 30] == 1 and temporada[30, 30] == 2012 - lfs.TEMPORADA_BASE  # scar 3
     assert conteo[31, 41] == 0  # the 2020 scar is past 2018
-    assert registro["cicatrices"] == 7
+    assert conteo[6, 45] == 1 and temporada[6, 45] == 1990 - lfs.TEMPORADA_BASE
+    assert registro["cicatrices"] == 8 and registro["temporada_base"] == lfs.TEMPORADA_BASE
     assert registro["pixeles_con_dos_o_mas"] == 4
     with pytest.raises(lfs.SourceError, match="overwrite"):
         lfs.construir_conteo(raiz, G, tmp_path / "conteo")
     otra = exportacion.Grilla(OESTE + PASO, NORTE, PASO, ANCHO, ALTO)
     with pytest.raises(lfs.SourceError, match="another grid"):
         lfs.leer_conteo(tmp_path / "conteo", otra, 0, 1)
+    sin_base = tmp_path / "sin_base"
+    sin_base.mkdir()
+    datos = json.loads((tmp_path / "conteo" / "conteo.json").read_text(encoding="utf-8"))
+    del datos["temporada_base"]
+    (sin_base / "conteo.json").write_text(json.dumps(datos), encoding="utf-8")
+    with pytest.raises(lfs.SourceError, match="season base"):
+        lfs.leer_conteo(sin_base, G, 0, 1)

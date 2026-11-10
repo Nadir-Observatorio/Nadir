@@ -362,7 +362,8 @@ _CONTEO = "conteo.u8"
 _TEMPORADA_UNICA = "temporada_unica.u8"
 _REGISTRO_CONTEO = "conteo.json"
 CONTEO_TOPE = 254
-TEMPORADA_BASE = 2000
+TEMPORADA_BASE = 1980
+"""Stored seasons are season minus 1980: 1985-2018 give 5-38, so 0 stays free for 'none'."""
 
 
 def construir_conteo(
@@ -372,8 +373,9 @@ def construir_conteo(
     where there is exactly one.
 
     Two files, one byte per pixel on the grid: `conteo.u8` (number of scars, capped at 254) and
-    `temporada_unica.u8` (season minus 2000 where the count is one, else 0). Same reading and
-    centre rule as `construir`; a scar repeated across zips counts once. Never overwrites.
+    `temporada_unica.u8` (season minus `TEMPORADA_BASE` where the count is one, else 0). Same
+    reading and centre rule as `construir`; a scar repeated across zips counts once. Never
+    overwrites.
     """
     for nombre in (_CONTEO, _TEMPORADA_UNICA, _REGISTRO_CONTEO):
         if (carpeta / nombre).exists():
@@ -386,6 +388,8 @@ def construir_conteo(
         if cic.temporada > hasta or cic.id in ids:
             continue
         ids.add(cic.id)
+        if not 0 < cic.temporada - TEMPORADA_BASE < 256:
+            raise SourceError(f"season {cic.temporada} of scar {cic.id} cannot be stored")
         vistas += 1
         if not ventana.any():
             continue
@@ -404,6 +408,7 @@ def construir_conteo(
     registro: dict[str, object] = {
         "grilla": asdict(grilla),
         "hasta_temporada": hasta,
+        "temporada_base": TEMPORADA_BASE,
         "cicatrices": vistas,
         "cicatrices_en_grilla": en_grilla,
         "pixeles_con_una": int((conteo == 1).sum()),
@@ -418,11 +423,14 @@ def construir_conteo(
 def leer_conteo(
     carpeta: Path, grilla: exportacion.Grilla, fila: int, filas: int
 ) -> tuple[npt.NDArray[np.uint8], npt.NDArray[np.uint8]]:
-    """Scar count and single-scar season (minus 2000) of rows `fila` to `fila + filas - 1`."""
+    """Scar count and single-scar season (minus `TEMPORADA_BASE`) of rows `fila` to
+    `fila + filas - 1`."""
     try:
         registro = json.loads((carpeta / _REGISTRO_CONTEO).read_text(encoding="utf-8"))
     except FileNotFoundError:
         raise SourceError(f"no scar count layer in {carpeta}") from None
+    if registro.get("temporada_base") != TEMPORADA_BASE:
+        raise SourceError(f"the scar count layer in {carpeta} uses another season base")
     if not exportacion.misma_grilla(exportacion.Grilla(**registro["grilla"]), grilla):
         raise SourceError(f"the scar count layer in {carpeta} belongs to another grid")
     salida = []
