@@ -282,3 +282,18 @@ def leer_tramos(
     if datos.size != filas * grilla.ancho:
         raise SourceError(f"{carpeta / _TRAMOS} is shorter than its grid")
     return datos.reshape(filas, grilla.ancho)
+
+
+def leer_altitud(
+    carpeta: Path, grilla: exportacion.Grilla, fila: int, filas: int
+) -> npt.NDArray[np.int16]:
+    """Altitude in metres of rows `fila` to `fila + filas - 1`, after checking the saved grid."""
+    registro = json.loads((carpeta / _REGISTRO).read_text(encoding="utf-8"))
+    if registro.get("grilla") != asdict(grilla):
+        raise SourceError(f"the slope files in {carpeta} belong to another grid")
+    with (carpeta / _ALTITUD).open("rb") as origen:
+        origen.seek(fila * grilla.ancho * 2)
+        datos = np.fromfile(origen, dtype="<i2", count=filas * grilla.ancho)
+    if datos.size != filas * grilla.ancho:
+        raise SourceError(f"{carpeta / _ALTITUD} is shorter than its grid")
+    return datos.astype(np.int16).reshape(filas, grilla.ancho)

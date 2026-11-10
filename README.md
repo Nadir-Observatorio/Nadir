@@ -17,10 +17,14 @@ registro/variables.toml   variables, with licence and attribution as each provid
 src/nadir/                errors, licencias, registro, procedencia, grilla, tabla, nucleo, banco,
                           area, exportacion, celdas, transiciones
 src/nadir/capas/          one module per source (cobertura: MapBiomas Chile land cover, collection 2.0;
-                          fuego: MapBiomas Fire Chile, collection 1; elevacion: Copernicus GLO-30)
+                          fuego: MapBiomas Fire Chile, collection 1; elevacion: Copernicus GLO-30;
+                          lfs: Landscape Fire Scars; interfaz: distance to the urban interface)
+src/nadir/estudio/        the fire and land cover study: tablas, categorias, estimador, espacial,
+                          analisis, validacion
 gee/                      Google Earth Engine export scripts
 tests/                    one test module per source module, synthetic data only
 docs/design.md            principles, substrate, licences, layer engine and statistical rules
+docs/estudio.md           method of the fire and land cover study, reproduction and amendments
 ```
 
 ## Use
@@ -56,6 +60,12 @@ python -m nadir transiciones tabular --bruto <bank> --celdas <folder> --desfases
 `transiciones tabular` also takes `--resolucion`, `--pendiente <folder>` (rows split by slope
 band) and `--cicatrices <folder>` with `--excluir` or `--excluir-control` (`ignicion_2008_2012`,
 `hasta_2018`) to leave out pixels inside known fire scars.
+
+The fire and land cover study (`docs/estudio.md`) adds the distance to the urban interface and the
+`estudio` commands: `tablas` (area tables by cell), `analizar` (main analysis to JSON),
+`sensibilidad` (scar sensitivities), `chequeo-lfs` (Jaccard check against Landscape Fire Scars)
+and `validar` (agreement and accuracy against the 2024 Viña del Mar fire, which needs
+`pip install -e ".[validacion]"`). The full order of commands is in `docs/estudio.md`, section 7.
 
 ## Licence
 

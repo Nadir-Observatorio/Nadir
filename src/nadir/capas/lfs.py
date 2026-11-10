@@ -222,20 +222,8 @@ def construir(
     if (carpeta / _REGISTRO).exists() or (carpeta / _BANDERAS).exists():
         raise SourceError(f"refusing to overwrite the scar files in {carpeta}")
     origen = bruto / CARPETA
-    zips = sorted(origen.glob("*.zip"))
-    if not zips:
-        raise SourceError(f"no zip files in {origen}")
     toml = origen / banco.PROCEDENCIA
-    if not toml.is_file():
-        raise SourceError(f"{origen} has no {banco.PROCEDENCIA}")
-    _, archivos = banco.leer(origen)
-    registrados = {a.nombre: a for a in archivos}
-    for ruta in zips:
-        registro_zip = registrados.get(ruta.name)
-        if registro_zip is None:
-            raise SourceError(f"{ruta.name} is not recorded in {toml}")
-        if ruta.stat().st_size != registro_zip.bytes:
-            raise SourceError(f"{ruta.name}: size differs from its record")
+    zips = _zips_registrados(bruto)
     banderas = np.zeros((grilla.alto, grilla.ancho), dtype=np.uint8)
     inventario: dict[str, list[object]] = {k: [] for k in (
         "id", "region", "umbral", "ignicion", "temporada", "area_total_m2", "solapes",
@@ -333,3 +321,116 @@ def leer_banderas(
     if datos.size != filas * grilla.ancho:
         raise SourceError(f"{carpeta / _BANDERAS} is shorter than its grid")
     return datos.reshape(filas, grilla.ancho)
+
+
+def _zips_registrados(bruto: Path) -> list[Path]:
+    """The zip files of the bank folder, each checked by name and size against its record."""
+    origen = bruto / CARPETA
+    zips = sorted(origen.glob("*.zip"))
+    if not zips:
+        raise SourceError(f"no zip files in {origen}")
+    toml = origen / banco.PROCEDENCIA
+    if not toml.is_file():
+        raise SourceError(f"{origen} has no {banco.PROCEDENCIA}")
+    _, archivos = banco.leer(origen)
+    registrados = {a.nombre: a for a in archivos}
+    for ruta in zips:
+        registro_zip = registrados.get(ruta.name)
+        if registro_zip is None:
+            raise SourceError(f"{ruta.name} is not recorded in {toml}")
+        if ruta.stat().st_size != registro_zip.bytes:
+            raise SourceError(f"{ruta.name}: size differs from its record")
+    return zips
+
+
+def recorrer(
+    bruto: Path, grilla: exportacion.Grilla
+) -> Iterator[tuple[Cicatriz, int, int, npt.NDArray[np.bool_]]]:
+    """Every scar of the bank with its footprint on the grid: top row, left column and window.
+
+    Same reading and centre rule as `construir`; scars that miss the grid have an empty window.
+    """
+    for ruta in _zips_registrados(bruto):
+        with zipfile.ZipFile(ruta) as archivo:
+            for miembro, m in _miembros(archivo):
+                cic = _cicatriz(archivo, ruta.name, miembro, m)
+                f0, c0, ventana = proyectar(archivo.read(miembro), grilla)
+                yield cic, f0, c0, ventana
+
+
+_CONTEO = "conteo.u8"
+_TEMPORADA_UNICA = "temporada_unica.u8"
+_REGISTRO_CONTEO = "conteo.json"
+CONTEO_TOPE = 254
+TEMPORADA_BASE = 2000
+
+
+def construir_conteo(
+    bruto: Path, grilla: exportacion.Grilla, carpeta: Path, hasta: int = 2018
+) -> dict[str, object]:
+    """Number of scars of the seasons up to `hasta` on each pixel, and the season of the scar
+    where there is exactly one.
+
+    Two files, one byte per pixel on the grid: `conteo.u8` (number of scars, capped at 254) and
+    `temporada_unica.u8` (season minus 2000 where the count is one, else 0). Same reading and
+    centre rule as `construir`; a scar repeated across zips counts once. Never overwrites.
+    """
+    for nombre in (_CONTEO, _TEMPORADA_UNICA, _REGISTRO_CONTEO):
+        if (carpeta / nombre).exists():
+            raise SourceError(f"refusing to overwrite {carpeta / nombre}")
+    conteo = np.zeros((grilla.alto, grilla.ancho), dtype=np.uint8)
+    temporada = np.zeros((grilla.alto, grilla.ancho), dtype=np.uint8)
+    vistas = en_grilla = 0
+    ids: set[int] = set()
+    for cic, f0, c0, ventana in recorrer(bruto, grilla):
+        if cic.temporada > hasta or cic.id in ids:
+            continue
+        ids.add(cic.id)
+        vistas += 1
+        if not ventana.any():
+            continue
+        en_grilla += 1
+        alto, ancho = ventana.shape
+        zona_c = conteo[f0 : f0 + alto, c0 : c0 + ancho]
+        zona_t = temporada[f0 : f0 + alto, c0 : c0 + ancho]
+        zona_t[ventana & (zona_c == 0)] = cic.temporada - TEMPORADA_BASE
+        zona_t[ventana & (zona_c >= 1)] = 0
+        zona_c[ventana] = np.minimum(zona_c[ventana].astype(np.int16) + 1, CONTEO_TOPE)
+    if vistas == 0:
+        raise SourceError(f"no scar of the seasons up to {hasta} in the bank")
+    carpeta.mkdir(parents=True, exist_ok=True)
+    (carpeta / _CONTEO).write_bytes(conteo.tobytes())
+    (carpeta / _TEMPORADA_UNICA).write_bytes(temporada.tobytes())
+    registro: dict[str, object] = {
+        "grilla": asdict(grilla),
+        "hasta_temporada": hasta,
+        "cicatrices": vistas,
+        "cicatrices_en_grilla": en_grilla,
+        "pixeles_con_una": int((conteo == 1).sum()),
+        "pixeles_con_dos_o_mas": int((conteo >= 2).sum()),
+        "sha256": {n: _sha256(carpeta / n) for n in (_CONTEO, _TEMPORADA_UNICA)},
+    }
+    texto = json.dumps(registro, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    (carpeta / _REGISTRO_CONTEO).write_bytes(texto.encode("utf-8"))
+    return registro
+
+
+def leer_conteo(
+    carpeta: Path, grilla: exportacion.Grilla, fila: int, filas: int
+) -> tuple[npt.NDArray[np.uint8], npt.NDArray[np.uint8]]:
+    """Scar count and single-scar season (minus 2000) of rows `fila` to `fila + filas - 1`."""
+    try:
+        registro = json.loads((carpeta / _REGISTRO_CONTEO).read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        raise SourceError(f"no scar count layer in {carpeta}") from None
+    if not exportacion.misma_grilla(exportacion.Grilla(**registro["grilla"]), grilla):
+        raise SourceError(f"the scar count layer in {carpeta} belongs to another grid")
+    salida = []
+    for nombre in (_CONTEO, _TEMPORADA_UNICA):
+        with (carpeta / nombre).open("rb") as origen:
+            origen.seek(fila * grilla.ancho)
+            datos = np.fromfile(origen, dtype="u1", count=filas * grilla.ancho)
+        if datos.size != filas * grilla.ancho:
+            raise SourceError(f"{carpeta / nombre} is shorter than its grid")
+        salida.append(datos.reshape(filas, grilla.ancho))
+    return salida[0], salida[1]

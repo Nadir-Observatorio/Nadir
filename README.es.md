@@ -18,10 +18,14 @@ registro/variables.toml   variables, con su licencia y la atribución que pide c
 src/nadir/                errors, licencias, registro, procedencia, grilla, tabla, nucleo, banco,
                           area, exportacion, celdas, transiciones
 src/nadir/capas/          un módulo por fuente (cobertura: MapBiomas Chile, colección 2.0;
-                          fuego: MapBiomas Fuego Chile, colección 1; elevacion: Copernicus GLO-30)
+                          fuego: MapBiomas Fuego Chile, colección 1; elevacion: Copernicus GLO-30;
+                          lfs: Landscape Fire Scars; interfaz: distancia a la interfaz urbana)
+src/nadir/estudio/        el estudio de fuego y cobertura: tablas, categorias, estimador, espacial,
+                          analisis, validacion
 gee/                      scripts de exportación de Google Earth Engine
 tests/                    un módulo de pruebas por módulo, solo con datos sintéticos
 docs/design.md            principios, sustrato, licencias, motor de capas y reglas estadísticas
+docs/estudio.md           método del estudio de fuego y cobertura, reproducción y enmiendas (en inglés)
 ```
 
 ## Uso
@@ -57,6 +61,13 @@ python -m nadir transiciones tabular --bruto <banco> --celdas <carpeta> --desfas
 `transiciones tabular` acepta además `--resolucion`, `--pendiente <carpeta>` (filas separadas por
 tramo de pendiente) y `--cicatrices <carpeta>` con `--excluir` o `--excluir-control`
 (`ignicion_2008_2012`, `hasta_2018`) para dejar fuera los píxeles dentro de cicatrices conocidas.
+
+El estudio de fuego y cobertura (`docs/estudio.md`) agrega la distancia a la interfaz urbana y los
+comandos `estudio`: `tablas` (tablas de área por celda), `analizar` (análisis principal a JSON),
+`sensibilidad` (sensibilidades con cicatrices), `chequeo-lfs` (Jaccard contra Landscape Fire
+Scars) y `validar` (concordancia y exactitud frente al incendio de Viña del Mar de 2024, que
+necesita `pip install -e ".[validacion]"`). El orden completo de los comandos está en
+`docs/estudio.md`, sección 7.
 
 El código y sus mensajes están en inglés; los nombres de los módulos, en español.
 
