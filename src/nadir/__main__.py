@@ -26,6 +26,7 @@ python -m nadir estudio analizar --tablas <folder> --salida <results.json> [--re
 python -m nadir estudio trayectorias --tablas <folder> --salida <results.json>
 python -m nadir estudio urbanizacion --tablas <folder> [--tabla u5|l5] --salida <results.json>
 python -m nadir estudio sensibilidad --tablas <folder> --numero 2 --salida <results.json>
+python -m nadir estudio mapas --tablas <folder> --salida <folder>
 python -m nadir estudio sensibilidad7 --tablas <folder> --tablas-c1 <folder> --salida <results.json>
 python -m nadir estudio chequeo-lfs --bruto F:\\Biblioteca\\bruto --salida <folder>
 python -m nadir estudio validar --bruto F:\\Biblioteca\\bruto --clases <clases.tif>
@@ -43,7 +44,7 @@ import nadir
 from nadir import banco, celdas, exportacion, transiciones
 from nadir.capas import cobertura, cobertura_c1, elevacion, fuego, interfaz, lfs
 from nadir.errors import NadirError
-from nadir.estudio import analisis, exploratorio, tablas, trayectorias, validacion
+from nadir.estudio import analisis, exploratorio, mapas, tablas, trayectorias, validacion
 
 _BITS = {"hasta_2018": lfs.BIT_HASTA_2018, "ignicion_2008_2012": lfs.BIT_IGNICION_2008_2012}
 
@@ -307,6 +308,16 @@ def _estudio_sensibilidad7(args: argparse.Namespace) -> None:
             texto = f", 95 % interval {intervalo[0]} to {intervalo[1]}" if intervalo else ""
             print(f"{clave}: effect {valor['efecto_pp']} pp{texto}")
     print(f"{salida}: written with {args.replicas} replicates")
+
+
+def _estudio_mapas(args: argparse.Namespace) -> None:
+    celdas = mapas.por_celda(Path(args.tablas))
+    rutas = mapas.escribir(celdas, Path(args.salida))
+    for res, t in celdas.items():
+        con = int(t.efecto_pp.notna().sum())
+        print(f"resolution {res}: {len(t)} cells with burned area, {con} with an effect")
+    for ruta in rutas:
+        print(f"{ruta}: written")
 
 
 def _estudio_chequeo_lfs(args: argparse.Namespace) -> None:
@@ -616,6 +627,12 @@ def main(argv: list[str] | None = None) -> int:
     est_s7.add_argument("--salida", required=True, help="results file; never overwritten")
     est_s7.add_argument("--replicas", type=int, default=2000, help="bootstrap replicates")
     est_s7.set_defaults(funcion=_estudio_sensibilidad7)
+    est_map = est_acc.add_parser(
+        "mapas", help="burned area and H1 effect by H3 cell (resolutions 6 and 7), GeoJSON and CSV"
+    )
+    est_map.add_argument("--tablas", required=True, help="folder of the tables")
+    est_map.add_argument("--salida", required=True, help="output folder; never overwritten")
+    est_map.set_defaults(funcion=_estudio_mapas)
     est_lfs = est_acc.add_parser("chequeo-lfs", help="Jaccard of each large scar against Fire")
     est_lfs.add_argument("--bruto", required=True, help="root of the raw-data bank")
     est_lfs.add_argument("--salida", required=True, help="folder for the files; never overwritten")

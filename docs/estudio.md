@@ -122,6 +122,7 @@ python -m nadir estudio tablas ... --salida <tablas> --tablas k3 balance
 python -m nadir estudio tablas ... --salida <tablas> --tablas k5
 python -m nadir estudio analizar --tablas <tablas> --salida resultados.json
 python -m nadir estudio trayectorias --tablas <tablas> --salida trayectorias.json
+python -m nadir estudio mapas --tablas <tablas> --salida <mapas>
 python -m nadir estudio tablas ... --tablas k3 --cicatrices <lfs> --excluir ignicion_2008_2012 --salida <s2>
 python -m nadir estudio sensibilidad --tablas <s2> --numero 2 --salida sensibilidad_2.json
 python -m nadir estudio tablas ... --tablas k3 --cicatrices <lfs> --excluir-control hasta_2018 --salida <s3>
@@ -163,6 +164,13 @@ Where the method left room for a reading, the code takes this one:
   February 2024 in the Valparaíso region against about 7,032 ha in the platform clip (0.3 %).
 - **p values** of 0 are reported with their bound (below 1/2000 with 2,000 replicates).
 - A class with fewer than 30 resolution-4 blocks with burned area is reported without interval.
+- **Maps by H3 cell** (resolutions 6 and 7): the effect of H1 is an area-weighted mean over burned
+  pixels of the outcome minus the standardised control proportion of the pixel's stratum, so it
+  splits exactly by cell; each cell carries its effect and its share, and the shares add up to H1
+  (the code stops otherwise). The stratum stays at resolution 6 with its ring; a resolution-7 cell
+  uses the strata of its parent. A cell with less than 100 ha of burned forest in eligible strata
+  shows its burned area but no effect. No interval by cell. Cell outlines are H3 cells; no
+  administrative boundary is drawn.
 
 ## 9. Amendments
 
