@@ -82,6 +82,8 @@ def test_files_and_command_line(tmp_path, capsys):
     geo = json.loads((salida / "celdas_r6.geojson").read_text(encoding="utf-8"))
     csv = pd.read_csv(salida / "celdas_r6.csv")
     assert len(geo["features"]) == len(csv)
+    for archivo in salida.iterdir():
+        assert b"\r" not in archivo.read_bytes()
     rasgo = geo["features"][0]
     anillo = rasgo["geometry"]["coordinates"][0]
     assert anillo[0] == anillo[-1] and len(anillo) == 7

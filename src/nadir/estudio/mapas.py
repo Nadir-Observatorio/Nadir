@@ -102,7 +102,7 @@ def _valor(v: object) -> object:
 
 
 def escribir(celdas: dict[int, pd.DataFrame], carpeta: Path) -> list[Path]:
-    """GeoJSON and CSV of each resolution. Never overwrites."""
+    """GeoJSON and CSV of each resolution, with LF line ends on every system. Never overwrites."""
     rutas = []
     for res in celdas:
         for ext in ("geojson", "csv"):
@@ -115,7 +115,9 @@ def escribir(celdas: dict[int, pd.DataFrame], carpeta: Path) -> list[Path]:
         tabla = t.copy()
         tabla.insert(0, "h3", [h3n.int_to_str(int(c)) for c in tabla.celda])
         tabla = tabla.drop(columns="celda")
-        tabla.to_csv(carpeta / f"celdas_r{res}.csv", index=False, float_format="%.4f")
+        tabla.to_csv(
+            carpeta / f"celdas_r{res}.csv", index=False, float_format="%.4f", lineterminator="\n"
+        )
         rasgos = [
             {
                 "type": "Feature",
@@ -127,5 +129,5 @@ def escribir(celdas: dict[int, pd.DataFrame], carpeta: Path) -> list[Path]:
         ]
         coleccion = {"type": "FeatureCollection", "features": rasgos}
         texto = json.dumps(coleccion, ensure_ascii=False, allow_nan=False)
-        (carpeta / f"celdas_r{res}.geojson").write_text(texto + "\n", encoding="utf-8")
+        (carpeta / f"celdas_r{res}.geojson").write_bytes((texto + "\n").encode("utf-8"))
     return rutas
