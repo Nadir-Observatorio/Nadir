@@ -11,7 +11,7 @@ with replacement, with all its burned and control content; percentile 95 % inter
 p = share of replicates with an effect at or below zero.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any
 
 import h3.api.numpy_int as h3n
@@ -135,6 +135,44 @@ def bootstrap(
         w = np.bincount(rng.integers(0, nb, nb), minlength=nb).astype(float)
         out[r] = fn(w)
     return out
+
+
+def bootstrap_conjunto(
+    fns: Sequence[Callable[[Arreglo], float]],
+    nb: int,
+    semilla: int = SEMILLA,
+    replicas: int = REPLICAS,
+) -> npt.NDArray[np.float64]:
+    """Value of every function in `fns` for the same replicates of block weights.
+
+    Column j holds what `bootstrap(fns[j], nb, semilla, replicas)` returns: the draws are the
+    same, so contrasts between columns use the same blocks in each replicate.
+    """
+    rng = np.random.default_rng(semilla)
+    out = np.empty((replicas, len(fns)))
+    for r in range(replicas):
+        w = np.bincount(rng.integers(0, nb, nb), minlength=nb).astype(float)
+        out[r] = [fn(w) for fn in fns]
+    return out
+
+
+def resumen_bilateral(est: float, rep: Arreglo) -> dict[str, Any]:
+    """Contrast in percentage points, percentile interval and two-sided p.
+
+    Two-sided p = twice the smaller share of replicates on either side of zero, at most 1.
+    """
+    rep = rep[np.isfinite(rep)]
+    lo, hi = np.percentile(rep, [2.5, 97.5])
+    p = float(min(1.0, 2 * min((rep <= 0).mean(), (rep >= 0).mean())))
+    salida: dict[str, Any] = {
+        "efecto_pp": round(100 * est, 3),
+        "ic95_pp": [round(100 * lo, 3), round(100 * hi, 3)],
+        "p_bilateral": p,
+        "replicas_validas": int(rep.size),
+    }
+    if p == 0:
+        salida["p_cota"] = f"< 2/{rep.size}"
+    return salida
 
 
 def resumen(est: float, rep: Arreglo) -> dict[str, Any]:

@@ -188,3 +188,59 @@ Where the method left room for a reading, the code takes this one:
 | E-5 | 2026-11-09 | Two exploratory extensions declared before computing: robustness to land cover collection 1 (sensitivity 7) and urbanisation after fire; the second turned out not evaluable by construction | Partly (confirmatory results yes; the new figures no) |
 | E-6 | 2026-11-09 | Urbanisation after fire with the fire defined by Landscape Fire Scars and the outcome from land cover collection 2 (exploratory) | Partly (confirmatory results yes; the new figures no) |
 | E-7 | 2026-11-09 | Sensitivity 7 takes the level-1 class of each collection 1 code from the MapBiomas network legend shared by both collections, since the collection 1 legend document is no longer published; any code outside that table stops the reading | No collection 1 pixel had been read |
+
+## 10. Interface module
+
+A second stage, fixed and dated on 2026-11-13 before any new source was downloaded or crossed. It
+extends the method above without replacing it: H1 and H3 keep their wording and their results.
+
+- **H4 (confirmatory).** The effect of H1 differs inside the urban interface from outside it.
+  Estimator, strata, minimum control and horizon of H1; each side keeps the burned and the
+  control area of its own band, so each side is standardised with its own control and H1 is not
+  the weighted mean of the two sides. Interface: the 2 km band of land cover code 24 in t - 1
+  (the band of H3). Contrast D = effect inside - effect outside, two-sided, with the block
+  bootstrap of H1; both effects use the same block weights in every replicate. Two-sided p =
+  twice the smaller share of replicates on either side of zero.
+- **H3' (confirmatory, conditional).** Conversion to non-vegetated area (codes 24 and 25) of
+  burned land in the interface against the comparable control, with a fire source that does not
+  go through the thematic filter of MapBiomas Fire. It needs a source for 2013-2021 at 30 m or
+  finer; if none is available by 2026-11-27, H3' is declared not feasible.
+- **Holm** over H4 and H3' (m = 2), or m = 1 when H3' is not feasible. `estudio interfaz` takes m
+  as a required argument, so it is declared before H4 is computed.
+- **Sensitivity of H4** (amendment V3-E1): the interface of the "Multi-threshold Wildland Urban
+  Interface of Chile" (Gelabert Vadillo, Félez and Rodrigues, 2025; Zenodo,
+  doi:10.5281/zenodo.17670820; CC BY 4.0). A pixel is interface when its Interface or Intermix
+  intensity is greater than 0.5, a majority of the 12 threshold combinations; no data is not
+  interface. `interfaz wui` takes, for each export pixel, the 30 m source pixel that holds its
+  centre (GDAL warp with an exact transformation, nothing averaged), and the band is the same for
+  every fire year. Tables are then built with `estudio tablas --interfaz-wui`.
+- **H5 (descriptive).** Exposure where burned forest does not return: population, infrastructure,
+  productive systems and ecosystem in the resolution-6 cells with their own positive effect
+  (100 ha or more of comparable burned forest), the cells of the published maps. Readings of the
+  code (`estudio exposicion`):
+  - population: persons and private dwellings of the 2024 Census, from blocks (urban and hamlet)
+    and rural entities; each polygon gives a cell the share of its area that falls in it (areas
+    in geographic coordinates: a ratio within one polygon);
+  - infrastructure: school establishments (Mineduc, 2021), health establishments in operation
+    with no closing date (DEIS) and fire companies (2017), by the cell that holds the point;
+  - productive systems and ecosystem: area of level-1 classes 3, and 1 and 2, of land cover 2024;
+  - inside or outside the interface: the 2 km band of code 24 of 2023, the year before the land
+    cover year (built with `interfaz construir --anios 2023`); a pixel by its own band, a piece of
+    a census polygon and an establishment by the band of the pixel under its centre or point;
+  - region of a cell: the region of its centre;
+  - figures of persons from 1 to 49 are blanked with their dwellings, in cells and in regions;
+    every table describes aggregates, not the people or places inside a cell (ecological
+    fallacy).
+
+```bash
+python -m nadir interfaz wui --bruto <banco> --salida <wui>
+python -m nadir estudio tablas ... --interfaz-wui <wui> --tablas k3 --salida <tablas_wui>
+python -m nadir estudio interfaz --tablas <tablas> --holm-m <1 or 2> --tablas-wui <tablas_wui> --salida h4.json
+python -m nadir interfaz construir --bruto <banco> --salida <interfaz_2023> --anios 2023
+python -m nadir estudio exposicion --tablas <tablas> --bruto <banco> --celdas <celdas> --interfaz <interfaz_2023> --limites mbchile_regiones_7.geojson --salida <h5>
+```
+
+| # | Date | What it fixes | Results seen? |
+|---|---|---|---|
+| V3-E1 | 2026-11-13 | The sensitivity of H4 uses the WUI layer of Zenodo, interface = Interface or Intermix intensity above 0.5, because the interface layer named first is not published for download | No: no value of the layer had been read |
+| V3-E2 | 2026-11-13 | A descriptive national context box: area affected by region of Chile from CONAF statistics and the share of interface area from the layer of V3-E1; no effect outside the seven regions | No |

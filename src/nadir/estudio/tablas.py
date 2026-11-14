@@ -35,7 +35,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from nadir import celdas, exportacion
-from nadir.capas import cobertura, cobertura_c1, elevacion, fuego, interfaz, lfs
+from nadir.capas import cobertura, cobertura_c1, elevacion, fuego, interfaz, interfaz_wui, lfs
 from nadir.errors import GridError, SourceError
 
 NO_OBSERVADO = 27
@@ -97,6 +97,7 @@ class Insumos:
     excluir_bits: int = 0
     excluir_bits_control: int = 0
     conteo_lfs: Path | None = None
+    interfaz_wui: Path | None = None
 
     def __post_init__(self) -> None:
         if (self.excluir_bits or self.excluir_bits_control) and self.cicatrices is None:
@@ -161,6 +162,8 @@ def construir(
         if tuple(elegidas) != (TABLA_C1,):
             raise SourceError(f"with collection 1 only {TABLA_C1} is built (sensitivity 7)")
         tablas = {TABLA_C1: (TABLAS[TABLA_C1][0], cobertura_c1.ANIOS_FUEGO)}
+    if insumos.interfaz_wui is not None and tuple(elegidas) != ("k3",):
+        raise SourceError("with the WUI band only k3 is built (H4 sensitivity)")
     if any(n in EXPLORATORIAS_LFS for n in tablas) and insumos.conteo_lfs is None:
         raise SourceError("the l5 table needs the scar count layer (lfs conteo)")
     con_balance = BALANCE in elegidas
@@ -196,6 +199,7 @@ def construir(
                 **_exclusion(insumos, fuera[nombre]),
                 **_mascaras(mascaras[nombre]),
                 **({"coleccion": "1"} if coleccion == 1 else {}),
+                **({"interfaz": "wui"} if insumos.interfaz_wui is not None else {}),
             },
         )
     if con_balance:
@@ -357,6 +361,11 @@ def _banda(
     filas: int,
     usar: npt.NDArray[np.bool_],
 ) -> Claves:
+    if insumos.interfaz_wui is not None:
+        banda = interfaz_wui.leer_banda(insumos.interfaz_wui, g, fila, filas)[usar]
+        if np.any(banda == interfaz_wui.FUERA):
+            raise SourceError("WUI band missing for pixels in the study")
+        return banda.astype(np.int64)
     if previo not in interfaz.ANIOS:
         return np.zeros(int(usar.sum()), dtype=np.int64)
     banda = interfaz.leer_banda(insumos.interfaz, g, previo, fila, filas)[usar]

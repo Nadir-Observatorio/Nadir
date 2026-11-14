@@ -391,3 +391,51 @@ def test_lfs_table_groups_by_scar_count(entorno, tmp_path):
     for clave, area in esperado.items():
         assert obtenido[clave] == pytest.approx(area, rel=1e-9)
     assert {1, 0} <= set(t["grupo"]) and 2 not in set(t["grupo"])
+
+
+def _capa_wui(carpeta, g, banda):
+    carpeta.mkdir()
+    (carpeta / "banda_wui.u8").write_bytes(banda.astype(np.uint8).tobytes())
+    (carpeta / "registro_wui.json").write_text(json.dumps({"grilla": asdict(g)}),
+                                               encoding="utf-8")
+
+
+def test_wui_band_replaces_the_interface_band_in_k3(entorno, tmp_path):
+    raiz, insumos, g, cob, anual, tramos, altitud = entorno
+    banda = np.random.default_rng(21).integers(0, 2, (ALTO, ANCHO)).astype(np.uint8)
+    banda[0, :] = 255  # outside the export, as in row 0 of the synthetic land cover
+    _capa_wui(tmp_path / "wui", g, banda)
+    # Expected: the pixel count with an interface layer whose band is the WUI band every year.
+    copia = tmp_path / "interfaz_fija"
+    copia.mkdir()
+    (copia / "registro.json").write_bytes((insumos.interfaz / "registro.json").read_bytes())
+    for anio in interfaz.ANIOS:
+        (copia / f"banda_{anio}.u8").write_bytes(banda.tobytes())
+        (copia / f"dist40_{anio}.u8").write_bytes(
+            (insumos.interfaz / f"dist40_{anio}.u8").read_bytes())
+    con_wui = tablas.Insumos(insumos.celdas, insumos.pendiente, insumos.interfaz,
+                             interfaz_wui=tmp_path / "wui")
+    tablas.construir(raiz, con_wui, tmp_path / "t", ("k3",))
+    fija = tablas.Insumos(insumos.celdas, insumos.pendiente, copia)
+    desfases, anios = tablas.TABLAS["k3"]
+    esperado, _ = _esperado(g, cob, anual, tramos, altitud, fija, desfases, anios, True)
+    obtenido = _leer(tmp_path / "t" / "k3.parquet", True, len(desfases))
+    assert obtenido.keys() == esperado.keys()
+    for clave, (area, n) in esperado.items():
+        assert obtenido[clave][0] == pytest.approx(area, rel=1e-9)
+        assert obtenido[clave][1] == n
+    meta = pq.read_table(tmp_path / "t" / "k3.parquet").schema.metadata
+    assert meta[b"interfaz"] == b"wui"
+
+
+def test_wui_band_builds_only_k3_and_must_cover_the_study(entorno, tmp_path):
+    raiz, insumos, g, *_ = entorno
+    banda = np.zeros((ALTO, ANCHO), dtype=np.uint8)
+    banda[5, 5] = 255
+    _capa_wui(tmp_path / "wui", g, banda)
+    con_wui = tablas.Insumos(insumos.celdas, insumos.pendiente, insumos.interfaz,
+                             interfaz_wui=tmp_path / "wui")
+    with pytest.raises(SourceError, match="only k3"):
+        tablas.construir(raiz, con_wui, tmp_path / "t", ("k3", "balance"))
+    with pytest.raises(SourceError, match="WUI band missing"):
+        tablas.construir(raiz, con_wui, tmp_path / "t2", ("k3",))

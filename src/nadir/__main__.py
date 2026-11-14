@@ -11,6 +11,7 @@ python -m nadir celdas construir --bruto F:\\Biblioteca\\bruto --resolucion 7 --
 python -m nadir elevacion descargar --bruto F:\\Biblioteca\\bruto
 python -m nadir elevacion pendiente --bruto F:\\Biblioteca\\bruto --salida <folder>
 python -m nadir interfaz construir --bruto F:\\Biblioteca\\bruto --salida <folder> [--anios 2017]
+python -m nadir interfaz wui --bruto F:\\Biblioteca\\bruto --salida <folder>
 python -m nadir lfs construir --bruto F:\\Biblioteca\\bruto --salida <folder>
 python -m nadir lfs conteo --bruto F:\\Biblioteca\\bruto --salida <folder>
 python -m nadir transiciones tabular --bruto F:\\Biblioteca\\bruto --celdas <folder>
@@ -22,6 +23,12 @@ python -m nadir estudio tablas --bruto F:\\Biblioteca\\bruto --celdas <folder> -
     [--cicatrices <folder>] [--excluir ignicion_2008_2012] [--excluir-control hasta_2018]
     [--conteo-lfs <folder> --tablas l5]
 python -m nadir estudio tablas ... --coleccion 1 --salida <folder>   (k3 with collection 1)
+python -m nadir estudio tablas ... --interfaz-wui <folder> --tablas k3 --salida <folder>
+python -m nadir estudio interfaz --tablas <folder> --holm-m 1 [--p-h3prima 0.01]
+    [--tablas-wui <folder>] --salida <results.json> [--replicas 2000]
+python -m nadir interfaz construir --bruto <bank> --salida <folder> --anios 2023
+python -m nadir estudio exposicion --tablas <folder> --bruto <bank> --celdas <folder>
+    --interfaz <folder with 2023> --limites <regions.geojson> --salida <folder>
 python -m nadir estudio analizar --tablas <folder> --salida <results.json> [--replicas 2000]
 python -m nadir estudio trayectorias --tablas <folder> --salida <results.json>
 python -m nadir estudio urbanizacion --tablas <folder> [--tabla u5|l5] --salida <results.json>
@@ -43,17 +50,19 @@ from pathlib import Path
 
 import nadir
 from nadir import banco, celdas, exportacion, transiciones
-from nadir.capas import cobertura, cobertura_c1, elevacion, fuego, interfaz, lfs
+from nadir.capas import cobertura, cobertura_c1, elevacion, fuego, interfaz, interfaz_wui, lfs
 from nadir.errors import NadirError
 from nadir.estudio import (
     analisis,
     exploratorio,
+    exposicion,
     mapas,
     regiones,
     tablas,
     trayectorias,
     validacion,
 )
+from nadir.estudio import interfaz as estudio_interfaz
 
 _BITS = {"hasta_2018": lfs.BIT_HASTA_2018, "ignicion_2008_2012": lfs.BIT_IGNICION_2008_2012}
 
@@ -220,7 +229,11 @@ def _elevacion_pendiente(args: argparse.Namespace) -> None:
 
 
 def _interfaz_construir(args: argparse.Namespace) -> None:
-    anios = _anios(args.anios, interfaz.ANIOS)
+    # The band of the year before the land cover of H5 is built on its own (exposure tables).
+    if args.anios and set(args.anios) == {exposicion.ANIO_BANDA}:
+        anios: tuple[int, ...] = (exposicion.ANIO_BANDA,)
+    else:
+        anios = _anios(args.anios, interfaz.ANIOS)
     with cobertura.abrir(Path(args.bruto)) as mosaico:
         registro = interfaz.construir(mosaico, Path(args.salida), anios)
     por_anio = registro["anios"]
@@ -234,6 +247,52 @@ def _interfaz_construir(args: argparse.Namespace) -> None:
     print(f"{args.salida}: {len(por_anio)} years written")
 
 
+def _interfaz_wui(args: argparse.Namespace) -> None:
+    with cobertura.abrir(Path(args.bruto)) as mosaico:
+        registro = interfaz_wui.construir(Path(args.bruto), mosaico, Path(args.salida))
+    print(
+        f"WUI: {registro['pixeles_interfaz']} of {registro['pixeles_dentro']} pixels are "
+        f"interface ({registro['area_interfaz_ha']} ha); band sha256 {registro['sha256_banda']}"
+    )
+    print(f"{args.salida}: written")
+
+
+def _estudio_interfaz(args: argparse.Namespace) -> None:
+    salida = Path(args.salida)
+    if salida.exists():
+        raise NadirError(f"refusing to overwrite {salida}")
+    resultados = estudio_interfaz.analizar_h4(
+        Path(args.tablas),
+        args.holm_m,
+        args.p_h3prima,
+        Path(args.tablas_wui) if args.tablas_wui else None,
+        args.replicas,
+    )
+    analisis.escribir(resultados, salida)
+    d = resultados["H4"]["D_dentro_menos_fuera"]
+    if "ic95_pp" in d:
+        bajo, alto = (float(x) for x in d["ic95_pp"])
+        print(
+            f"H4: D {d['efecto_pp']} pp, 95 % interval {bajo} to {alto}, "
+            f"Holm p {d['p_holm']} (m = {args.holm_m})"
+        )
+    else:
+        print(f"H4: D {d['efecto_pp']} pp, {d['nota']}")
+    print(f"{salida}: written with {args.replicas} replicates")
+
+
+def _estudio_exposicion(args: argparse.Namespace) -> None:
+    por_celda, por_region, meta = exposicion.analizar_h5(
+        Path(args.tablas), Path(args.bruto), Path(args.celdas), Path(args.interfaz),
+        Path(args.limites),
+    )
+    rutas = exposicion.escribir(por_celda, por_region, meta, Path(args.salida))
+    print(f"H5: {meta['celdas_sin_retorno']} cells without return, "
+          f"{len(por_region)} regions")
+    for ruta in rutas:
+        print(f"{ruta}: written")
+
+
 def _estudio_tablas(args: argparse.Namespace) -> None:
     insumos = tablas.Insumos(
         Path(args.celdas),
@@ -243,6 +302,7 @@ def _estudio_tablas(args: argparse.Namespace) -> None:
         sum({_BITS[n] for n in args.excluir}),
         sum({_BITS[n] for n in args.excluir_control}),
         Path(args.conteo_lfs) if args.conteo_lfs else None,
+        Path(args.interfaz_wui) if args.interfaz_wui else None,
     )
     elegidas = tuple(args.tablas) if args.coleccion == 2 else (tablas.TABLA_C1,)
     huellas = tablas.construir(
@@ -541,6 +601,10 @@ def main(argv: list[str] | None = None) -> int:
     itf_con.add_argument("--salida", required=True, help="folder for the files; never overwritten")
     itf_con.add_argument("--anios", type=int, nargs="*", default=[], help="years (default all)")
     itf_con.set_defaults(funcion=_interfaz_construir)
+    itf_wui = itf_acc.add_parser("wui", help="WUI band of the Zenodo layer on the export grid")
+    itf_wui.add_argument("--bruto", required=True, help="root of the raw-data bank")
+    itf_wui.add_argument("--salida", required=True, help="folder for the files; never overwritten")
+    itf_wui.set_defaults(funcion=_interfaz_wui)
 
     lf = temas.add_parser("lfs", help="Landscape Fire Scars Database for Chile")
     lf_acc = lf.add_subparsers(dest="accion", required=True)
@@ -595,6 +659,9 @@ def main(argv: list[str] | None = None) -> int:
     est_tab.add_argument("--cicatrices", default=None, help="folder of the scar layer")
     est_tab.add_argument("--conteo-lfs", default=None, help="folder of the scar count (for l5)")
     est_tab.add_argument(
+        "--interfaz-wui", default=None, help="folder of the WUI band (k3 for the H4 sensitivity)"
+    )
+    est_tab.add_argument(
         "--excluir", nargs="+", choices=sorted(_BITS), default=[], help="flags out of every group"
     )
     est_tab.add_argument(
@@ -617,6 +684,25 @@ def main(argv: list[str] | None = None) -> int:
     est_ana.add_argument("--salida", required=True, help="results file; never overwritten")
     est_ana.add_argument("--replicas", type=int, default=2000, help="bootstrap replicates")
     est_ana.set_defaults(funcion=_estudio_analizar)
+    est_itf = est_acc.add_parser("interfaz", help="H4: effect inside and outside the interface")
+    est_itf.add_argument("--tablas", required=True, help="folder of the study tables")
+    est_itf.add_argument(
+        "--holm-m", type=int, choices=(1, 2), required=True,
+        help="Holm family size, declared before H4: 1 when H3' is not feasible",
+    )
+    est_itf.add_argument("--p-h3prima", type=float, default=None, help="p of H3' when m = 2")
+    est_itf.add_argument("--tablas-wui", default=None, help="folder of the k3 table with WUI band")
+    est_itf.add_argument("--salida", required=True, help="results file; never overwritten")
+    est_itf.add_argument("--replicas", type=int, default=2000, help="bootstrap replicates")
+    est_itf.set_defaults(funcion=_estudio_interfaz)
+    est_exp = est_acc.add_parser("exposicion", help="H5: exposure in cells without return")
+    est_exp.add_argument("--tablas", required=True, help="folder of the study tables")
+    est_exp.add_argument("--bruto", required=True, help="root of the raw-data bank")
+    est_exp.add_argument("--celdas", required=True, help="folder of the resolution-8 cell map")
+    est_exp.add_argument("--interfaz", required=True, help="folder with the band of 2023")
+    est_exp.add_argument("--limites", required=True, help="GeoJSON of the regions")
+    est_exp.add_argument("--salida", required=True, help="folder for the tables; never overwritten")
+    est_exp.set_defaults(funcion=_estudio_exposicion)
     est_tra = est_acc.add_parser("trayectorias", help="trajectories and matrix by year, to JSON")
     est_tra.add_argument("--tablas", required=True, help="folder of the study tables")
     est_tra.add_argument("--salida", required=True, help="results file; never overwritten")
