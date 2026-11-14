@@ -224,6 +224,13 @@ extends the method above without replacing it: H1 and H3 keep their wording and 
   interface. `interfaz wui` takes, for each export pixel, the 30 m source pixel that holds its
   centre (GDAL warp with an exact transformation, nothing averaged), and the band is the same for
   every fire year. Tables are then built with `estudio tablas --interfaz-wui`.
+- **National context box** (amendment V3-E2, descriptive): for every region of Chile, the area
+  affected by wildfires in the CONAF summary by municipality over the seasons 2012-2013 to
+  2020-2021, and the interface area of the layer of V3-E1 with each region's share of the national
+  interface. Regional outlines: administrative level 4 of the OpenStreetMap extract of Chile in
+  the bank; Biobío and Ñuble go together because Ñuble was created in 2018. The share is of the
+  national interface, not of the region's land, because those outlines include the territorial
+  sea. `estudio contexto` needs the optional dependencies `.[contexto]`.
 - **H5 (descriptive).** Exposure where burned forest does not return: population, infrastructure,
   productive systems and ecosystem in the resolution-6 cells with their own positive effect
   (100 ha or more of comparable burned forest), the cells of the published maps. Readings of the
@@ -250,6 +257,8 @@ python -m nadir estudio tablas ... --gabam <gabam> --tablas g3 --salida <tablas_
 python -m nadir estudio h3prima --tablas <tablas_gabam> --salida h3prima.json
 python -m nadir estudio interfaz --tablas <tablas> --holm-m <1 or 2> --tablas-wui <tablas_wui> --salida h4.json
 python -m nadir interfaz construir --bruto <banco> --salida <interfaz_2023> --anios 2023
+pip install -e ".[contexto]"
+python -m nadir estudio contexto --bruto <banco> --salida <contexto>
 python -m nadir estudio exposicion --tablas <tablas> --bruto <banco> --celdas <celdas> --interfaz <interfaz_2023> --limites mbchile_regiones_7.geojson --salida <h5>
 ```
 

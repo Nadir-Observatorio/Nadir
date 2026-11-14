@@ -28,6 +28,7 @@ python -m nadir estudio interfaz --tablas <folder> --holm-m 1 [--p-h3prima 0.01]
     [--tablas-wui <folder>] --salida <results.json> [--replicas 2000]
 python -m nadir interfaz construir --bruto <bank> --salida <folder> --anios 2023
 python -m nadir gabam construir --bruto <bank> --salida <folder>
+python -m nadir estudio contexto --bruto <bank> --salida <folder>   (needs .[contexto])
 python -m nadir estudio tablas ... --gabam <folder> --tablas g3 --salida <folder>
 python -m nadir estudio h3prima --tablas <folder> --salida <results.json> [--replicas 2000]
 python -m nadir estudio exposicion --tablas <folder> --bruto <bank> --celdas <folder>
@@ -66,6 +67,7 @@ from nadir.capas import (
 from nadir.errors import NadirError
 from nadir.estudio import (
     analisis,
+    contexto,
     exploratorio,
     exposicion,
     mapas,
@@ -316,6 +318,20 @@ def _estudio_h3prima(args: argparse.Namespace) -> None:
     p = r.get("p_unilateral", "no interval")
     print(f"H3': effect {r['efecto_pp']} pp, raw one-sided p {p}")
     print(f"{salida}: written with {args.replicas} replicates")
+
+
+def _estudio_contexto(args: argparse.Namespace) -> None:
+    t, regiones_geo, meta = contexto.construir(Path(args.bruto))
+    rutas = contexto.escribir(t, meta, Path(args.salida))
+    geo = Path(args.salida) / "regiones_chile_osm.geojson"
+    if geo.exists():
+        raise NadirError(f"refusing to overwrite {geo}")
+    geo.write_bytes(json.dumps(regiones_geo, ensure_ascii=False).encode("utf-8"))
+    estudio = float(t.afectada_pct_nacional[t.estudio].sum())
+    print(f"national context: {len(t)} regions; the study regions hold {estudio:.1f} % "
+          "of the area affected in 2013-2021")
+    for ruta in [*rutas, geo]:
+        print(f"{ruta}: written")
 
 
 def _estudio_exposicion(args: argparse.Namespace) -> None:
@@ -752,6 +768,10 @@ def main(argv: list[str] | None = None) -> int:
     est_h3p.add_argument("--salida", required=True, help="results file; never overwritten")
     est_h3p.add_argument("--replicas", type=int, default=2000, help="bootstrap replicates")
     est_h3p.set_defaults(funcion=_estudio_h3prima)
+    est_ctx = est_acc.add_parser("contexto", help="national context box (CONAF and WUI)")
+    est_ctx.add_argument("--bruto", required=True, help="root of the raw-data bank")
+    est_ctx.add_argument("--salida", required=True, help="folder for the table; never overwritten")
+    est_ctx.set_defaults(funcion=_estudio_contexto)
     est_exp = est_acc.add_parser("exposicion", help="H5: exposure in cells without return")
     est_exp.add_argument("--tablas", required=True, help="folder of the study tables")
     est_exp.add_argument("--bruto", required=True, help="root of the raw-data bank")
