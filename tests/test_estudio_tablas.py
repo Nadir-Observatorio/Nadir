@@ -439,3 +439,59 @@ def test_wui_band_builds_only_k3_and_must_cover_the_study(entorno, tmp_path):
         tablas.construir(raiz, con_wui, tmp_path / "t", ("k3", "balance"))
     with pytest.raises(SourceError, match="WUI band missing"):
         tablas.construir(raiz, con_wui, tmp_path / "t2", ("k3",))
+
+
+def test_g3_takes_the_groups_from_gabam(entorno, tmp_path):
+    from nadir.capas import gabam
+
+    raiz, insumos, g, cob, anual, tramos, _ = entorno
+    rng = np.random.default_rng(31)
+    capa = {a: (rng.random((ALTO, ANCHO)) < 0.2).astype(np.uint8) for a in gabam.ANIOS}
+    capa[2015][2, :] = gabam.FUERA  # a row outside the GABAM export in one year
+    carpeta = tmp_path / "gabam"
+    carpeta.mkdir()
+    (carpeta / "registro_gabam.json").write_text(json.dumps({"grilla": asdict(g)}),
+                                                 encoding="utf-8")
+    for a, v in capa.items():
+        (carpeta / f"quemado_{a}.u8").write_bytes(v.tobytes())
+    con = tablas.Insumos(insumos.celdas, insumos.pendiente, insumos.interfaz, gabam=carpeta)
+    with pytest.raises(SourceError, match="GABAM layer"):
+        tablas.construir(raiz, insumos, tmp_path / "x", ("g3",))
+    tablas.construir(raiz, con, tmp_path / "t", ("g3",))
+    meta = pq.read_table(tmp_path / "t" / "g3.parquet").schema.metadata
+    assert meta[b"fuego"] == b"gabam"
+    desfases, anios = tablas.CONFIRMATORIAS_GABAM["g3"]
+    veces = (anual == 1).sum(axis=0)
+    veces_g = sum((v == gabam.QUEMADO).astype(int) for v in capa.values())
+    fuera_g = np.any([v == gabam.FUERA for v in capa.values()], axis=0)
+    areas = g.area_filas_m2(0, ALTO)
+    esperado = {}
+    for anio in anios:
+        banda = interfaz.leer_banda(insumos.interfaz, g, anio - 1, 0, ALTO)
+        for f in range(ALTO):
+            for c in range(ANCHO):
+                if anual[0, f, c] == 255 or tramos[f, c] == elevacion.SIN_TRAMO:
+                    continue
+                codigos = tuple(
+                    int(cob[cobertura.ANIOS_ESTUDIO.index(anio + d), f, c]) for d in desfases
+                )
+                if any(x in (0, 255, 27) for x in codigos) or fuera_g[f, c]:
+                    continue
+                if veces_g[f, c] == 0 and veces[f, c] == 0:
+                    grupo = 0
+                elif capa[anio][f, c] == gabam.QUEMADO:
+                    grupo = 1 if veces_g[f, c] == 1 else 2
+                else:
+                    continue
+                lat = float(g.latitudes(f, 1)[0])
+                lon = float(g.longitudes(c, 1)[0])
+                celda = int(h3n.cell_to_parent(h3n.latlng_to_cell(lat, lon, 8), 7))
+                clave = (celda, anio, grupo, int(tramos[f, c]), int(banda[f, c]), *codigos)
+                area, n = esperado.get(clave, (0.0, 0))
+                esperado[clave] = (area + areas[f], n + 1)
+    obtenido = _leer(tmp_path / "t" / "g3.parquet", True, len(desfases))
+    assert obtenido.keys() == esperado.keys()
+    assert {k[2] for k in obtenido} == {0, 1, 2}
+    for clave, (area, n) in esperado.items():
+        assert obtenido[clave][0] == pytest.approx(area, rel=1e-9)
+        assert obtenido[clave][1] == n

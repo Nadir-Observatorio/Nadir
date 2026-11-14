@@ -204,7 +204,17 @@ extends the method above without replacing it: H1 and H3 keep their wording and 
 - **H3' (confirmatory, conditional).** Conversion to non-vegetated area (codes 24 and 25) of
   burned land in the interface against the comparable control, with a fire source that does not
   go through the thematic filter of MapBiomas Fire. It needs a source for 2013-2021 at 30 m or
-  finer; if none is available by 2026-11-27, H3' is declared not feasible.
+  finer; if none is available by 2026-11-27, H3' is declared not feasible. Candidate source:
+  GABAM, the 30 m annual burned area maps of Long et al. (2019), exported for the seven regions
+  from the Earth Engine community catalog (`gee/exportar_gabam.js`). Readings of the code
+  (`gabam construir`, `estudio tablas --gabam --tablas g3`, `estudio h3prima`):
+  - each land cover pixel takes the GABAM pixel that holds its centre;
+  - burned = burned in GABAM in year t (once in 2013-2021; more than once is kept apart, as
+    in H1); control = never burned in GABAM 2013-2021 and never burned in Fire 2013-2025;
+  - outcome = codes 24 or 25 in t + 2 and in t + 3; previous class (t - 1) other than
+    non-vegetated area; both groups inside the 2 km band of t - 1;
+  - estimator of H1 with the previous level-1 class added to the stratum, one-sided p (more
+    conversion in the burned), block bootstrap of H1.
 - **Holm** over H4 and H3' (m = 2), or m = 1 when H3' is not feasible. `estudio interfaz` takes m
   as a required argument, so it is declared before H4 is computed.
 - **Sensitivity of H4** (amendment V3-E1): the interface of the "Multi-threshold Wildland Urban
@@ -235,6 +245,9 @@ extends the method above without replacing it: H1 and H3 keep their wording and 
 ```bash
 python -m nadir interfaz wui --bruto <banco> --salida <wui>
 python -m nadir estudio tablas ... --interfaz-wui <wui> --tablas k3 --salida <tablas_wui>
+python -m nadir gabam construir --bruto <banco> --salida <gabam>
+python -m nadir estudio tablas ... --gabam <gabam> --tablas g3 --salida <tablas_gabam>
+python -m nadir estudio h3prima --tablas <tablas_gabam> --salida h3prima.json
 python -m nadir estudio interfaz --tablas <tablas> --holm-m <1 or 2> --tablas-wui <tablas_wui> --salida h4.json
 python -m nadir interfaz construir --bruto <banco> --salida <interfaz_2023> --anios 2023
 python -m nadir estudio exposicion --tablas <tablas> --bruto <banco> --celdas <celdas> --interfaz <interfaz_2023> --limites mbchile_regiones_7.geojson --salida <h5>

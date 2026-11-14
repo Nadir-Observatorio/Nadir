@@ -19,15 +19,18 @@ from typing import Any
 
 import numpy as np
 import numpy.typing as npt
+import pandas as pd
+import pyarrow.parquet as pq
 
 from nadir.errors import SourceError
 from nadir.estudio import categorias as cat
-from nadir.estudio.categorias import BOSQUE, Tabla
+from nadir.estudio.categorias import BOSQUE, CATEGORIA, CATEGORIA_A_NIVEL1, SINVEG, Tabla
 from nadir.estudio.estimador import (
     MIN_BLOQUES,
     REPLICAS,
     SEMILLA,
     Estimador,
+    bootstrap,
     bootstrap_conjunto,
     resumen,
     resumen_bilateral,
@@ -138,3 +141,76 @@ def analizar_h4(
             raise SourceError("the WUI tables do not cover the same blocks as the main tables")
         out["H4_sensibilidad_wui"] = contraste(kw, bloques4, replicas)
     return out
+
+
+# ---------------------------------------------------------------------------
+# H3': conversion to non-vegetated area inside the interface, fire from GABAM
+# ---------------------------------------------------------------------------
+
+CODIGOS_H3PRIMA = (24, 25)
+NOTA_H3PRIMA = (
+    "fire from GABAM (not filtered by MapBiomas Fire); burned and control inside the interface "
+    "band of t - 1, previous class other than non-vegetated area, strata of H1 with the previous "
+    "level-1 class added"
+)
+
+
+def cargar_h3prima(ruta: Path) -> Tabla:
+    """g3 table with the previous level-1 class and the outcome of H3' per record.
+
+    The outcome needs the land cover code itself (24 or 25 in t + 2 and in t + 3), so the table
+    is not added up by category the way the other tables are.
+    """
+    archivo = pq.ParquetFile(ruta)
+    if (archivo.schema_arrow.metadata or {}).get(b"fuego") != b"gabam":
+        raise SourceError(f"{ruta} is not a table with the fire from GABAM")
+    llaves = ["celda", "anio", "grupo", "tramo", "banda", "l0", "y"]
+    partes = []
+    columnas = ["celda", "anio", "grupo", "tramo", "banda", "c0", "c1", "c2", "area_m2", "n_px"]
+    for lote in archivo.iter_batches(batch_size=4_000_000, columns=columnas):
+        d = lote.to_pandas()
+        d = d[d.anio <= ANIO_MAX_K3]
+        d["l0"] = CATEGORIA_A_NIVEL1[CATEGORIA[d.c0.to_numpy()]]
+        d["y"] = (d.c1.isin(CODIGOS_H3PRIMA) & d.c2.isin(CODIGOS_H3PRIMA)).astype(np.uint8)
+        partes.append(d.groupby(llaves, sort=False)[["area_m2", "n_px"]].sum().reset_index())
+    t = pd.concat(partes, ignore_index=True)
+    t = t.groupby(llaves, sort=False)[["area_m2", "n_px"]].sum().reset_index()
+    for res in (7, 6, 5, 4, 3):
+        t[f"r{res}"] = cat.padre(t["celda"].to_numpy(), res)
+    return t
+
+
+def h3prima(t: Tabla, replicas: int = REPLICAS) -> dict[str, Any]:
+    """Standardised effect of H3' (one-sided: more conversion in the burned) on a loaded table."""
+    previa = (t.banda.to_numpy() == DENTRO) & (t.l0.to_numpy() != SINVEG)
+    estratos = t.assign(tramo=t.tramo.to_numpy() * 8 + t.l0.to_numpy())
+    bloques = np.unique(t.r4.to_numpy())
+    e = Estimador(estratos, previa, t.y.to_numpy(dtype=float), 1, 6, 4, bloques)
+    efecto, pq_, pc = e.efecto(np.ones(e.nb))
+    salida: dict[str, Any]
+    if e.bloques_con_quemado >= MIN_BLOQUES:
+        rep = bootstrap(lambda w: e.efecto(w)[0], e.nb, replicas=replicas)
+        salida = resumen(efecto, rep)
+    else:
+        salida = {"efecto_pp": round(100 * efecto, 3), "nota": SIN_INTERVALO}
+    salida.update(
+        {
+            "p_quemado": round(100 * pq_, 3),
+            "p_control_estandarizado": round(100 * pc, 3),
+            "area_quemada_ha": round(e.area_q_total / 1e4, 1),
+            "area_quemada_fuera_ha": round(e.area_q_fuera / 1e4, 1),
+            "estratos": e.estratos,
+            "bloques_con_quemado": e.bloques_con_quemado,
+            "nota": NOTA_H3PRIMA,
+        }
+    )
+    return salida
+
+
+def analizar_h3prima(tablas_gabam: Path, replicas: int = REPLICAS) -> dict[str, Any]:
+    """H3' with its raw one-sided p; Holm is applied with H4 (`analizar_h4`, m = 2)."""
+    return {
+        "semilla": SEMILLA,
+        "replicas": replicas,
+        "H3prima": h3prima(cargar_h3prima(tablas_gabam / "g3.parquet"), replicas),
+    }

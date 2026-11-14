@@ -27,6 +27,9 @@ python -m nadir estudio tablas ... --interfaz-wui <folder> --tablas k3 --salida 
 python -m nadir estudio interfaz --tablas <folder> --holm-m 1 [--p-h3prima 0.01]
     [--tablas-wui <folder>] --salida <results.json> [--replicas 2000]
 python -m nadir interfaz construir --bruto <bank> --salida <folder> --anios 2023
+python -m nadir gabam construir --bruto <bank> --salida <folder>
+python -m nadir estudio tablas ... --gabam <folder> --tablas g3 --salida <folder>
+python -m nadir estudio h3prima --tablas <folder> --salida <results.json> [--replicas 2000]
 python -m nadir estudio exposicion --tablas <folder> --bruto <bank> --celdas <folder>
     --interfaz <folder with 2023> --limites <regions.geojson> --salida <folder>
 python -m nadir estudio analizar --tablas <folder> --salida <results.json> [--replicas 2000]
@@ -50,7 +53,16 @@ from pathlib import Path
 
 import nadir
 from nadir import banco, celdas, exportacion, transiciones
-from nadir.capas import cobertura, cobertura_c1, elevacion, fuego, interfaz, interfaz_wui, lfs
+from nadir.capas import (
+    cobertura,
+    cobertura_c1,
+    elevacion,
+    fuego,
+    gabam,
+    interfaz,
+    interfaz_wui,
+    lfs,
+)
 from nadir.errors import NadirError
 from nadir.estudio import (
     analisis,
@@ -281,6 +293,31 @@ def _estudio_interfaz(args: argparse.Namespace) -> None:
     print(f"{salida}: written with {args.replicas} replicates")
 
 
+def _gabam_construir(args: argparse.Namespace) -> None:
+    with cobertura.abrir(Path(args.bruto)) as mosaico:
+        registro = gabam.construir(
+            Path(args.bruto), mosaico, Path(args.salida), cobertura.banda(2020)
+        )
+    por_anio = registro["anios"]
+    if not isinstance(por_anio, dict):
+        raise NadirError("GABAM record without years")
+    for anio, datos in por_anio.items():
+        print(f"{anio}: {datos['area_quemada_ha']} ha burned")
+    print(f"{args.salida}: written")
+
+
+def _estudio_h3prima(args: argparse.Namespace) -> None:
+    salida = Path(args.salida)
+    if salida.exists():
+        raise NadirError(f"refusing to overwrite {salida}")
+    resultados = estudio_interfaz.analizar_h3prima(Path(args.tablas), args.replicas)
+    analisis.escribir(resultados, salida)
+    r = resultados["H3prima"]
+    p = r.get("p_unilateral", "no interval")
+    print(f"H3': effect {r['efecto_pp']} pp, raw one-sided p {p}")
+    print(f"{salida}: written with {args.replicas} replicates")
+
+
 def _estudio_exposicion(args: argparse.Namespace) -> None:
     por_celda, por_region, meta = exposicion.analizar_h5(
         Path(args.tablas), Path(args.bruto), Path(args.celdas), Path(args.interfaz),
@@ -303,6 +340,7 @@ def _estudio_tablas(args: argparse.Namespace) -> None:
         sum({_BITS[n] for n in args.excluir_control}),
         Path(args.conteo_lfs) if args.conteo_lfs else None,
         Path(args.interfaz_wui) if args.interfaz_wui else None,
+        Path(args.gabam) if args.gabam else None,
     )
     elegidas = tuple(args.tablas) if args.coleccion == 2 else (tablas.TABLA_C1,)
     huellas = tablas.construir(
@@ -594,6 +632,13 @@ def main(argv: list[str] | None = None) -> int:
     ele_pen.add_argument("--salida", required=True, help="folder for the files; never overwritten")
     ele_pen.set_defaults(funcion=_elevacion_pendiente)
 
+    gab = temas.add_parser("gabam", help="GABAM burned area on the land cover grid (H3')")
+    gab_acc = gab.add_subparsers(dest="accion", required=True)
+    gab_con = gab_acc.add_parser("construir", help="burned band by year on the export grid")
+    gab_con.add_argument("--bruto", required=True, help="root of the raw-data bank")
+    gab_con.add_argument("--salida", required=True, help="folder for the files; never overwritten")
+    gab_con.set_defaults(funcion=_gabam_construir)
+
     itf = temas.add_parser("interfaz", help="distance to the urban interface (land cover code 24)")
     itf_acc = itf.add_subparsers(dest="accion", required=True)
     itf_con = itf_acc.add_parser("construir", help="band and distance by year on the export grid")
@@ -652,12 +697,19 @@ def main(argv: list[str] | None = None) -> int:
     est_tab.add_argument(
         "--tablas",
         nargs="+",
-        choices=[*tablas.TABLAS, *tablas.EXPLORATORIAS, *tablas.EXPLORATORIAS_LFS, tablas.BALANCE],
+        choices=[
+            *tablas.TABLAS,
+            *tablas.EXPLORATORIAS,
+            *tablas.EXPLORATORIAS_LFS,
+            *tablas.CONFIRMATORIAS_GABAM,
+            tablas.BALANCE,
+        ],
         default=[*tablas.TABLAS, tablas.BALANCE],
         help="tables to build (balance needs k3)",
     )
     est_tab.add_argument("--cicatrices", default=None, help="folder of the scar layer")
     est_tab.add_argument("--conteo-lfs", default=None, help="folder of the scar count (for l5)")
+    est_tab.add_argument("--gabam", default=None, help="folder of the GABAM layer (for g3)")
     est_tab.add_argument(
         "--interfaz-wui", default=None, help="folder of the WUI band (k3 for the H4 sensitivity)"
     )
@@ -695,6 +747,11 @@ def main(argv: list[str] | None = None) -> int:
     est_itf.add_argument("--salida", required=True, help="results file; never overwritten")
     est_itf.add_argument("--replicas", type=int, default=2000, help="bootstrap replicates")
     est_itf.set_defaults(funcion=_estudio_interfaz)
+    est_h3p = est_acc.add_parser("h3prima", help="H3': conversion to non-vegetated area, GABAM")
+    est_h3p.add_argument("--tablas", required=True, help="folder of the g3 table")
+    est_h3p.add_argument("--salida", required=True, help="results file; never overwritten")
+    est_h3p.add_argument("--replicas", type=int, default=2000, help="bootstrap replicates")
+    est_h3p.set_defaults(funcion=_estudio_h3prima)
     est_exp = est_acc.add_parser("exposicion", help="H5: exposure in cells without return")
     est_exp.add_argument("--tablas", required=True, help="folder of the study tables")
     est_exp.add_argument("--bruto", required=True, help="root of the raw-data bank")

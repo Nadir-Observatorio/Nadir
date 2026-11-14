@@ -136,3 +136,56 @@ def test_command_line_writes_h4(tmp_path, capsys):
     sin_m = ["estudio", "interfaz", "--tablas", str(carpeta), "--salida", str(tmp_path / "x")]
     with pytest.raises(SystemExit):
         main(sin_m)
+
+
+def _tabla_g3(ruta, filas, fuego=b"gabam"):
+    import pyarrow as pa
+
+    celda = int(h3n.latlng_to_cell(-35.0, -72.0, 7))
+    cols = {k: [] for k in ("celda", "anio", "grupo", "tramo", "banda", "c0", "c1", "c2",
+                            "area_m2", "n_px")}
+    for grupo, banda, c0, c1, c2, area in filas:
+        for k, v in zip(cols, (celda, 2015, grupo, 0, banda, c0, c1, c2, area, 60), strict=True):
+            cols[k].append(v)
+    tabla = pa.table(cols).replace_schema_metadata({"fuego": fuego})
+    pq.write_table(tabla, ruta)
+    return ruta
+
+
+def test_h3prima_counts_codes_24_and_25_inside_the_interface(tmp_path):
+    filas = [
+        # burned, inside, previous forest: 300 of 400 convert (24 then 25 counts)
+        (1, 0, 3, 24, 25, 300.0), (1, 0, 3, 3, 3, 100.0),
+        # control inside: 50 of 200 convert
+        (0, 0, 3, 25, 24, 50.0), (0, 0, 3, 3, 3, 150.0),
+        # code 22 is non-vegetated but not 24 or 25: not an outcome
+        (1, 0, 3, 22, 22, 0.0),
+        # outside the interface and previous non-vegetated: left out
+        (1, 1, 3, 24, 24, 999.0), (0, 1, 3, 3, 3, 999.0), (1, 0, 24, 24, 24, 999.0),
+    ]
+    t = interfaz.cargar_h3prima(_tabla_g3(tmp_path / "g3.parquet", filas))
+    r = interfaz.h3prima(t, replicas=5)
+    assert r["p_quemado"] == pytest.approx(75.0)
+    assert r["p_control_estandarizado"] == pytest.approx(25.0)
+    assert r["efecto_pp"] == pytest.approx(50.0)
+    assert "nota" in r  # a single block: no interval
+
+
+def test_h3prima_strata_keep_the_previous_class_apart(tmp_path):
+    filas = [
+        # burned forest converts, burned farmland does not; controls the other way round
+        (1, 0, 3, 24, 24, 300.0), (1, 0, 15, 15, 15, 100.0),
+        (0, 0, 3, 3, 3, 50.0), (0, 0, 3, 9, 9, 50.0),
+        (0, 0, 15, 24, 24, 50.0), (0, 0, 15, 25, 25, 50.0),
+    ]
+    t = interfaz.cargar_h3prima(_tabla_g3(tmp_path / "g3.parquet", filas))
+    r = interfaz.h3prima(t, replicas=5)
+    # forest 1 - 0 on 300, farmland 0 - 1 on 100: 50 pp (pooling the classes would give 25)
+    assert r["efecto_pp"] == pytest.approx(50.0)
+    assert r["estratos"] == 2
+
+
+def test_h3prima_refuses_tables_without_gabam_fire(tmp_path):
+    ruta = _tabla_g3(tmp_path / "g3.parquet", [(1, 0, 3, 24, 24, 1.0)], fuego=b"x")
+    with pytest.raises(SourceError, match="GABAM"):
+        interfaz.cargar_h3prima(ruta)

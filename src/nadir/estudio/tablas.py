@@ -35,7 +35,16 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from nadir import celdas, exportacion
-from nadir.capas import cobertura, cobertura_c1, elevacion, fuego, interfaz, interfaz_wui, lfs
+from nadir.capas import (
+    cobertura,
+    cobertura_c1,
+    elevacion,
+    fuego,
+    gabam,
+    interfaz,
+    interfaz_wui,
+    lfs,
+)
 from nadir.errors import GridError, SourceError
 
 NO_OBSERVADO = 27
@@ -56,6 +65,12 @@ EXPLORATORIAS: dict[str, tuple[tuple[int, ...], range]] = {"u5": ((-1, 4, 5), ra
 # scar of 1985-2018 and never burned in Fire 2013-2025; interface band of s - 2.
 EXPLORATORIAS_LFS: dict[str, tuple[tuple[int, ...], range]] = {
     "l5": ((-2, 4, 5), range(2014, 2019))
+}
+# H3' of the interface module: k3 with the fire taken from GABAM, years 2013-2021. Burned = burned
+# in GABAM in t (group 1 once in 2013-2021, group 2 more than once); control = never burned in
+# GABAM 2013-2021 and never burned in Fire 2013-2025; interface band of t - 1.
+CONFIRMATORIAS_GABAM: dict[str, tuple[tuple[int, ...], range]] = {
+    "g3": ((-1, 2, 3), range(2013, 2022))
 }
 INFRAESTRUCTURA = 24
 # Sensitivity 7: k3 rebuilt with land cover collection 1, fire years 2013-2019.
@@ -98,6 +113,7 @@ class Insumos:
     excluir_bits_control: int = 0
     conteo_lfs: Path | None = None
     interfaz_wui: Path | None = None
+    gabam: Path | None = None
 
     def __post_init__(self) -> None:
         if (self.excluir_bits or self.excluir_bits_control) and self.cicatrices is None:
@@ -153,7 +169,7 @@ def construir(
     """
     if coleccion not in COLECCIONES:
         raise SourceError(f"land cover collections are {COLECCIONES}, not {coleccion}")
-    todas = {**TABLAS, **EXPLORATORIAS, **EXPLORATORIAS_LFS}
+    todas = {**TABLAS, **EXPLORATORIAS, **EXPLORATORIAS_LFS, **CONFIRMATORIAS_GABAM}
     desconocidas = sorted(set(elegidas) - {*todas, BALANCE})
     if desconocidas:
         raise SourceError(f"unknown tables: {desconocidas}")
@@ -164,6 +180,8 @@ def construir(
         tablas = {TABLA_C1: (TABLAS[TABLA_C1][0], cobertura_c1.ANIOS_FUEGO)}
     if insumos.interfaz_wui is not None and tuple(elegidas) != ("k3",):
         raise SourceError("with the WUI band only k3 is built (H4 sensitivity)")
+    if any(n in CONFIRMATORIAS_GABAM for n in tablas) and insumos.gabam is None:
+        raise SourceError("the g3 table needs the GABAM layer (gabam construir)")
     if any(n in EXPLORATORIAS_LFS for n in tablas) and insumos.conteo_lfs is None:
         raise SourceError("the l5 table needs the scar count layer (lfs conteo)")
     con_balance = BALANCE in elegidas
@@ -200,6 +218,7 @@ def construir(
                 **_mascaras(mascaras[nombre]),
                 **({"coleccion": "1"} if coleccion == 1 else {}),
                 **({"interfaz": "wui"} if insumos.interfaz_wui is not None else {}),
+                **({"fuego": "gabam"} if nombre in CONFIRMATORIAS_GABAM else {}),
             },
         )
     if con_balance:
@@ -269,6 +288,13 @@ def _acumular(
             banderas = lfs.leer_banderas(insumos.cicatrices, g, fila, filas)
             fuera_todos = (banderas & insumos.excluir_bits) != 0
             fuera_control = (banderas & insumos.excluir_bits_control) != 0
+        if insumos.gabam is not None and any(n in CONFIRMATORIAS_GABAM for n in tablas):
+            quemas_g = {a: gabam.leer(insumos.gabam, g, a, fila, filas) for a in gabam.ANIOS}
+            veces_g = np.zeros(idx.shape, dtype=np.uint8)
+            fuera_g = np.zeros(idx.shape, dtype=bool)
+            for q in quemas_g.values():
+                veces_g += (q == gabam.QUEMADO).astype(np.uint8)
+                fuera_g |= q == gabam.FUERA
         if insumos.conteo_lfs is not None and any(n in EXPLORATORIAS_LFS for n in tablas):
             conteo, temporada_unica = lfs.leer_conteo(insumos.conteo_lfs, g, fila, filas)
         altura: Arreglo | None = None
@@ -285,7 +311,12 @@ def _acumular(
                         (c != cobertura.SIN_DATO) & (c != cobertura.FUERA) & (c != NO_OBSERVADO)
                     )
                 grupo = np.full(idx.shape, -1, dtype=np.int8)
-                if nombre in EXPLORATORIAS_LFS:
+                if nombre in CONFIRMATORIAS_GABAM:
+                    quem_g = (quemas_g[anio] == gabam.QUEMADO) & ~fuera_g
+                    grupo[(veces_g == 0) & (veces == 0) & ~fuera_g] = 0
+                    grupo[quem_g & (veces_g == 1)] = 1
+                    grupo[quem_g & (veces_g >= 2)] = 2
+                elif nombre in EXPLORATORIAS_LFS:
                     grupo[(conteo == 0) & (veces == 0)] = 0
                     grupo[(conteo == 1) & (temporada_unica == anio - lfs.TEMPORADA_BASE)] = 1
                 else:
