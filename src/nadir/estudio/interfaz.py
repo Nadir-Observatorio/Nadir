@@ -14,6 +14,7 @@ seed 20240202). Holm over H4 and H3' with m = 2, or m = 1 when H3' is not feasib
 by the caller, declared before H4 is computed.
 """
 
+import gc
 from pathlib import Path
 from typing import Any
 
@@ -130,6 +131,8 @@ def analizar_h4(
         "bloques_r4_en_dominio": int(bloques4.size),
     }
     h4 = contraste(k3, bloques4, replicas)
+    del k3  # the WUI table is as large: one in memory at a time
+    gc.collect()
     dif = h4["D_dentro_menos_fuera"]
     if "p_bilateral" in dif:
         dif["p_holm"] = holm_v3(dif["p_bilateral"], holm_m, p_h3prima)
